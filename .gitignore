@@ -1,0 +1,35 @@
+echo "## .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.csproj.user
+.vs/
+**/launchSettings.json
+
+## Docker
+.dockerignore
+**/.dockerignore
+docker-compose.override.yml
+
+## IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+## Database
+*.db
+*.db-journal
+*.sqlite
+
+## Logs
+*.log
+logs/
+
+## Environment
+.env
+.env.local
+.env.*.local
