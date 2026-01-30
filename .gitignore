@@ -1,4 +1,6 @@
-echo "## .NET
+# Atualizar .gitignore
+@"
+## .NET
 bin/
 obj/
 *.user
@@ -24,6 +26,7 @@ docker-compose.override.yml
 *.db
 *.db-journal
 *.sqlite
+data/sleep
 
 ## Logs
 *.log
@@ -33,3 +36,9 @@ logs/
 .env
 .env.local
 .env.*.local
+
+## Test results
+TestResults/
+coverage.xml
+coverage.json
+"@ | Out-File .\.gitignore -Encoding UTF8
