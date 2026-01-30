@@ -1,0 +1,6 @@
+@Ailos.Transferencia.Api_HostAddress = http://localhost:5080
+
+GET {{Ailos.Transferencia.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
