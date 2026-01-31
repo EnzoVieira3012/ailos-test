@@ -1,150 +1,255 @@
-# Ailos Conta Corrente API
+# Ailos Banking System - Sistema Bancário Completo
 
-API para gerenciamento de conta corrente com segurança avançada, idempotência e ofuscação de IDs.
+## 🏦 Visão Geral do Sistema
 
-## 🚀 Visão Geral
+Sistema bancário completo composto por **3 microsserviços** que trabalham em conjunto para fornecer operações financeiras seguras, escaláveis e com arquitetura moderna. Desenvolvido em .NET 8 com padrões de mercado e boas práticas de desenvolvimento.
 
-API RESTful para sistema bancário com funcionalidades completas de conta corrente, incluindo cadastro, login, movimentações (crédito/débito), consulta de saldo e inativação de contas. Desenvolvida em .NET 8 com arquitetura limpa e boas práticas de segurança.
+## 📦 Componentes do Sistema
 
-## ✨ Funcionalidades Principais
+### 🔵 **1. Ailos.ContaCorrente.Api**
+**API de Gerenciamento de Contas Correntes**  
+- Cadastro e autenticação de usuários
+- Movimentações (crédito/débito)
+- Consulta de saldo e histórico
+- Inativação de contas
+- **Porta**: `5081`
 
-### 🔐 Autenticação & Segurança
+### 🔴 **2. Ailos.Transferencia.Api**  
+**API de Transferências entre Contas**  
+- Transferências internas com segurança
+- Processamento transacional distribuído
+- Idempotência garantida
+- Integração com sistema de tarifas
+- **Porta**: `5082`
+
+### 🟢 **3. Ailos.Tarifa.Worker** (Próximo)
+**Worker de Processamento de Tarifas**  
+- Consumidor Kafka de transferências
+- Aplicação automática de tarifas
+- Processamento assíncrono
+- Comunicação com API de movimentação
+
+## 🚀 Funcionalidades Principais
+
+### 🔐 **Segurança Avançada**
 - **JWT Authentication**: Tokens com expiração configurável
-- **Senhas Criptografadas**: Hash com BCrypt + salt único
-- **CPF Validado**: Validação completa de dígitos verificadores
-- **IDs Ofuscados**: Encrypted ID para proteção de identificadores internos
+- **Senhas Criptografadas**: Hash BCrypt com salt único
+- **CPF Validado**: Validação completa com dígitos verificadores
+- **IDs Ofuscados**: Encrypted ID para proteção de identificadores
+- **HTTPS**: Comunicação segura em produção
 
-### 💳 Operações Bancárias
-- **Cadastro de Conta**: Criação com CPF, nome e senha
+### 💳 **Operações Bancárias**
+- **Cadastro de Conta**: CPF, nome e senha
 - **Login Flexível**: Por CPF ou número da conta
-- **Movimentações**: Crédito (C) e Débito (D) com validação de saldo
-- **Consulta de Saldo**: Em tempo real com extrato implícito
-- **Inativação de Conta**: Com validação de senha
+- **Movimentações**: Crédito (C) e Débito (D)
+- **Transferências**: Entre contas da mesma instituição
+- **Consulta de Saldo**: Em tempo real
+- **Inativação**: Com validação de senha
 
-### ⚡ Recursos Avançados
-- **Idempotência**: Processamento seguro de requisições duplicadas
-- **Validações de Domínio**: Regras de negócio aplicadas
-- **Tratamento de Erros**: Respostas padronizadas com ProblemDetails
-- **Health Checks**: Monitoramento de saúde da aplicação
+### ⚡ **Recursos Avançados**
+- **Idempotência**: Garantia de processamento único
+- **Transações Distribuídas**: Rollback automático em falhas
+- **Processamento Assíncrono**: Kafka para tarifação
+- **Validações de Domínio**: Regras de negócio robustas
+- **Health Checks**: Monitoramento completo
 
-## 🏗️ Arquitetura
+## 🏗️ Arquitetura do Sistema
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Presentation Layer                        │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │   Controllers + Middleware + Filters + DTOs         │    │
-│  └─────────────────────────────────────────────────────┘    │
+│                    Aplicações Client-Side                    │
+│  (Web/Mobile Apps, Third-party Integrations)                │
 └─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Application Layer                         │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │   Services + Command/Query + Application Logic      │    │
-│  └─────────────────────────────────────────────────────┘    │
+│                    API Gateway (Opcional)                    │
+│  (Load Balancing, Rate Limiting, Authentication)            │
 └─────────────────────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────────────┐
-│                    Domain Layer                             │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │   Entities + Value Objects + Domain Services        │    │
-│  │   + Domain Exceptions + Business Rules              │    │
-│  └─────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────────────┐
-│                    Infrastructure Layer                      │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │   Repositories + Security + Data Access + External  │    │
-│  │   Services + Configuration                          │    │
-│  └─────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
+                              │
+               ┌──────────────┼──────────────┐
+               ▼              ▼              ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│ Conta Corrente  │  │  Transferência  │  │     Kafka       │
+│     API         │  │      API        │  │    Cluster      │
+│  (Porta 5081)   │  │   (Porta 5082)  │  │  (Porta 9092)   │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
+       │                      │                      │
+       ▼                      ▼                      ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│  SQLite DB      │  │  SQLite DB      │  │   Tarifa        │
+│  (Contas)       │  │  (Transferências)│  │    Worker       │
+│                 │  │                  │  │   (Próximo)     │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
 ```
 
-## 📋 Endpoints da API
+## 📊 Fluxo de Transferência
 
-### 🔓 Endpoints Públicos
-- `POST /api/contacorrente/cadastrar` - Cadastro de nova conta
-- `POST /api/contacorrente/login` - Autenticação de usuário
+```mermaid
+graph TD
+    A[Cliente Inicia Transferência] --> B[API Transferência]
+    B --> C{Validação Idempotência}
+    C -->|Já Processada| D[Retorna Resultado Cache]
+    C -->|Nova| E[Registra Transferência]
+    E --> F[Débito na Conta Origem]
+    F --> G[Crédito na Conta Destino]
+    G --> H[Atualiza Status]
+    H --> I[Publica no Kafka]
+    I --> J[Tarifa Worker Processa]
+    J --> K[Débito Tarifa na Origem]
+    K --> L[Retorna Sucesso ao Cliente]
+    
+    style A fill:#f9f,stroke:#333,stroke-width:2px
+    style L fill:#9f9,stroke:#333,stroke-width:2px
+```
 
-### 🔐 Endpoints Protegidos (Requirem JWT)
-- `PUT /api/contacorrente/inativar` - Inativação de conta
-- `GET /api/contacorrente/saldo` - Consulta de saldo
-- `POST /api/movimentacao` - Realizar movimentação (crédito/débito)
+## 📋 Endpoints das APIs
 
-### 🛠️ Endpoints Administrativos
-- `GET /api/admin/idempotencia/{chave}` - Consulta de idempotência
-- `GET /api/admin/idempotencia/verificar/{chave}` - Verificação de processamento
-- `DELETE /api/admin/idempotencia/{chave}` - Remoção de registro
+### 🔵 **Conta Corrente API** (`:5081`)
+#### 🔓 Públicos
+- `POST /api/contacorrente/cadastrar` - Cadastro de conta
+- `POST /api/contacorrente/login` - Autenticação
 
-## 🛠️ Tecnologias Utilizadas
+#### 🔐 Protegidos
+- `PUT /api/contacorrente/inativar` - Inativar conta
+- `GET /api/contacorrente/saldo` - Consultar saldo
+- `POST /api/movimentacao` - Realizar movimentação
 
-- **.NET 8** - Framework principal
-- **SQLite** - Banco de dados leve
-- **Dapper** - Micro ORM para acesso a dados
+### 🔴 **Transferência API** (`:5082`)
+#### 🔐 Protegidos
+- `POST /api/transferencia` - Realizar transferência
+- `GET /api/transferencia/historico` - Histórico de transferências
+
+## 🛠️ Stack Tecnológica
+
+### **Backend (.NET 8)**
+- **ASP.NET Core 8** - Framework principal
+- **Entity Framework Core** - ORM (opcional para migrações)
+- **Dapper** - Micro ORM para performance
+- **SQLite** - Banco de dados leve e embutido
 - **JWT Bearer** - Autenticação por tokens
 - **BCrypt.Net** - Criptografia de senhas
-- **Swagger/OpenAPI** - Documentação interativa
-- **Docker** - Containerização
-- **FluentValidation** - Validação de dados
-- **System.Text.Json** - Serialização JSON
 
-## 🚀 Começando
+### **Comunicação & Mensageria**
+- **Kafka** - Sistema de mensageria distribuído
+- **KafkaFlow** - Biblioteca .NET para Kafka
+- **HTTP Client** - Comunicação síncrona entre APIs
+- **RESTful APIs** - Design de APIs REST
+
+### **Infraestrutura & DevOps**
+- **Docker** - Containerização
+- **Docker Compose** - Orquestração local
+- **SQLite** - Bancos de dados em arquivos
+- **Health Checks** - Monitoramento de saúde
+
+### **Segurança & Validação**
+- **Encrypted ID** - Ofuscação de identificadores
+- **FluentValidation** - Validação de dados
+- **ProblemDetails** - Padronização de erros
+- **API Key Authentication** - Autenticação entre serviços
+
+### **Documentação & Qualidade**
+- **Swagger/OpenAPI** - Documentação interativa
+- **xUnit** - Testes unitários
+- **FluentAssertions** - Asserts expressivos
+- **Serilog** - Logging estruturado
+
+## 🚀 Início Rápido
 
 ### Pré-requisitos
-- .NET 8.0 SDK
-- Docker (opcional, para containerização)
-- IDE (Visual Studio 2022+, VS Code, ou Rider)
-
-### Configuração do Ambiente
-
-1. **Clone o repositório**
 ```bash
-git clone https://github.com/seu-usuario/ailos-conta-corrente.git
-cd ailos-conta-corrente
+# 1. .NET 8 SDK
+dotnet --version  # Deve mostrar 8.x.x
+
+# 2. Docker & Docker Compose
+docker --version
+docker-compose --version
+
+# 3. Git
+git --version
 ```
 
-2. **Configure as variáveis de ambiente**
-Crie um arquivo `.env` na raiz (baseado no `.env.example`):
-```env
-ENCRYPTED_ID_SECRET=sua-chave-secreta-aqui
-JwtSettings__Secret=super-secret-jwt-key-2024!
-JwtSettings__Issuer=AilosContaCorrenteApi
-JwtSettings__Audience=AilosClient
-JwtSettings__ExpirationMinutes=60
-ConnectionStrings__DefaultConnection=Data Source=ailos.db
-```
-
-3. **Restaure as dependências**
+### Clone e Configuração
 ```bash
+# 1. Clone o repositório
+git clone https://github.com/seu-usuario/ailos-banking-system.git
+cd ailos-banking-system
+
+# 2. Configure as variáveis de ambiente
+cp .env.example .env
+# Edite o .env com suas chaves secretas
+
+# 3. Restaure dependências
 dotnet restore
+
+# 4. Execute com Docker Compose
+docker-compose up -d --build
 ```
 
-4. **Execute a aplicação**
+### Acesse os Serviços
 ```bash
-cd src/Ailos.ContaCorrente.Api
-dotnet run
+# API Conta Corrente - Swagger
+http://localhost:5081/swagger
+
+# API Transferência - Swagger  
+http://localhost:5082/swagger
+
+# Kafka UI - Monitoramento
+http://localhost:8080
+
+# Health Checks
+http://localhost:5081/health
+http://localhost:5082/health
 ```
 
-A API estará disponível em: `https://localhost:5001` (ou `http://localhost:5000`)
+## 🐳 Docker Compose
 
-## 🐳 Executando com Docker
+```yaml
+version: '3.8'
 
-```bash
-# Construir e executar os containers
-docker-compose up -d
+services:
+  # Banco de Dados SQLite
+  sqlite-db:
+    image: nouchka/sqlite3:latest
+    volumes:
+      - ./data:/root/db
+    command: sleep infinity
 
-# Acessar a API
-# Swagger: http://localhost:5081/swagger
-# Health Check: http://localhost:5081/health
+  # Kafka Cluster
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+  
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    ports: ["9092:9092"]
+    depends_on: [zookeeper]
 
-# Parar os containers
-docker-compose down
+  # APIs
+  conta-corrente-api:
+    build: ./src/Ailos.ContaCorrente.Api
+    ports: ["5081:80"]
+    depends_on: [sqlite-db, kafka]
+    environment:
+      - ENCRYPTED_ID_SECRET=${ENCRYPTED_ID_SECRET}
+      - JwtSettings__Secret=${JWT_SECRET}
+      - Kafka__BootstrapServers=kafka:9092
+
+  transferencia-api:
+    build: ./src/Ailos.Transferencia.Api  
+    ports: ["5082:80"]
+    depends_on: [conta-corrente-api, kafka]
+    environment:
+      - ENCRYPTED_ID_SECRET=${ENCRYPTED_ID_SECRET}
+      - JwtSettings__Secret=${JWT_SECRET}
+      - ContaCorrenteApi__BaseUrl=http://conta-corrente-api:80
+      - Kafka__BootstrapServers=kafka:9092
 ```
 
 ## 📊 Banco de Dados
 
-### Estrutura das Tabelas
-
-#### `contacorrente`
+### **Conta Corrente Database**
 ```sql
+-- Contas Correntes
 CREATE TABLE contacorrente (
     idcontacorrente INTEGER PRIMARY KEY AUTOINCREMENT,
     cpf TEXT NOT NULL UNIQUE,
@@ -154,13 +259,10 @@ CREATE TABLE contacorrente (
     senha_hash TEXT NOT NULL,
     salt TEXT NOT NULL,
     data_criacao TEXT NOT NULL DEFAULT (datetime('now')),
-    data_atualizacao TEXT,
     CHECK (ativo IN (0, 1))
 );
-```
 
-#### `movimento`
-```sql
+-- Movimentações
 CREATE TABLE movimento (
     idmovimento INTEGER PRIMARY KEY AUTOINCREMENT,
     idcontacorrente INTEGER NOT NULL,
@@ -169,12 +271,27 @@ CREATE TABLE movimento (
     valor REAL NOT NULL,
     descricao TEXT,
     CHECK (tipomovimento IN ('C', 'D')),
-    FOREIGN KEY(idcontacorrente) REFERENCES contacorrente(idcontacorrente) ON DELETE CASCADE
+    FOREIGN KEY(idcontacorrente) REFERENCES contacorrente(idcontacorrente)
 );
 ```
 
-#### `idempotencia`
+### **Transferência Database**
 ```sql
+-- Transferências
+CREATE TABLE transferencia (
+    idtransferencia INTEGER PRIMARY KEY AUTOINCREMENT,
+    idcontacorrente_origem INTEGER NOT NULL,
+    idcontacorrente_destino INTEGER NOT NULL,
+    datamovimento TEXT NOT NULL DEFAULT (datetime('now')),
+    valor REAL NOT NULL,
+    tarifa_aplicada REAL DEFAULT 0.00,
+    status TEXT NOT NULL DEFAULT 'PROCESSANDO',
+    mensagem_erro TEXT,
+    identificacao_requisicao TEXT UNIQUE,
+    CHECK (status IN ('PROCESSANDO', 'CONCLUIDA', 'FALHA', 'ESTORNADA'))
+);
+
+-- Idempotência
 CREATE TABLE idempotencia (
     chave_idempotencia TEXT PRIMARY KEY,
     requisicao TEXT,
@@ -183,197 +300,300 @@ CREATE TABLE idempotencia (
 );
 ```
 
-## 🔐 Segurança
+## 🔐 Sistema de Segurança
 
-### Ofuscação de IDs
-- **Encrypted ID**: IDs internos são ofuscados usando criptografia AES-256
-- **Proteção**: Evita enumeração e exposição de IDs sequenciais
-- **Reversibilidade**: Ofuscação reversível apenas com a chave secreta
-
-### Autenticação
-- **JWT Tokens**: Validação automática com middleware ASP.NET Core
-- **Claims**: `contaId` e `numeroConta` incluídos no token
-- **Expiração**: Configurável via `JwtSettings__ExpirationMinutes`
-
-### Validações
-- **CPF**: Validação completa dos dígitos verificadores
-- **Senha**: Mínimo de 6 caracteres, hash BCrypt
-- **Saldo**: Verificação prévia para débitos
-- **Ativo**: Apenas contas ativas podem operar
-
-## ⚡ Idempotência
-
-### Como Funciona
-1. **Chave de Idempotência**: Enviada no header `X-Idempotency-Key`
-2. **Verificação**: Middleware verifica se requisição já foi processada
-3. **Cache**: Resultados armazenados no banco de dados
-4. **Retorno**: Respostas idênticas para requisições duplicadas
-
-### Implementação
+### **Encrypted ID System**
 ```csharp
-// Middleware verifica idempotência
-public class IdempotenciaMiddleware
+// IDs ofuscados nas APIs
+public sealed record TransferenciaResponse
 {
-    public async Task InvokeAsync(HttpContext context, IIdempotenciaService service)
-    {
-        if (ShouldCheckIdempotency(context))
-        {
-            var key = GetIdempotencyKey(context);
-            if (await service.RequisicaoJaProcessadaAsync(key))
-            {
-                // Retorna resultado cacheado
-                await ReturnCachedResult(context, await service.ObterResultadoAsync(key));
-                return;
-            }
-        }
-        await _next(context);
-    }
+    [JsonConverter(typeof(EncryptedIdJsonConverter))]
+    public required EncryptedId TransferenciaId { get; init; }
+    
+    [JsonConverter(typeof(EncryptedIdJsonConverter))]  
+    public required EncryptedId ContaOrigemId { get; init; }
+    
+    [JsonConverter(typeof(EncryptedIdJsonConverter))]
+    public required EncryptedId ContaDestinoId { get; init; }
+}
+```
+
+### **Autenticação JWT**
+```yaml
+JwtSettings:
+  Secret: "super-secret-key-min-32-chars"
+  Issuer: "AilosBankingSystem"
+  Audience: "AilosClients"
+  ExpirationMinutes: 60
+```
+
+## ⚡ Processo de Transferência
+
+### **1. Validação Inicial**
+```csharp
+// Verificação de idempotência
+if (await _idempotenciaService.RequisicaoJaProcessadaAsync(request.IdentificacaoRequisicao))
+{
+    return await ProcessarRequisicaoIdempotente(request.IdentificacaoRequisicao);
+}
+```
+
+### **2. Processamento Transacional**
+```csharp
+try
+{
+    // Débito na origem
+    await _contaCorrenteClient.RealizarMovimentacaoAsync(
+        contaOrigemId, "D", valor, "Transferência");
+    
+    // Crédito no destino  
+    await _contaCorrenteClient.RealizarMovimentacaoAsync(
+        contaDestinoId, "C", valor, "Transferência recebida");
+    
+    // Atualiza status
+    transferencia.Concluir();
+    
+    // Publica no Kafka para tarifação
+    await _kafkaProducerService.ProduzirMensagemAsync(
+        "transferencias-realizadas", transferencia);
+}
+catch
+{
+    // Rollback automático
+    await RealizarEstorno(contaOrigemId, valor);
+    throw;
 }
 ```
 
 ## 📝 Exemplos de Uso
 
-### 1. Cadastro de Conta
-```http
-POST /api/contacorrente/cadastrar
-Content-Type: application/json
-
-{
-  "cpf": "12345678909",
-  "nome": "João Silva",
-  "senha": "senha123"
-}
-```
-
-### 2. Login
-```http
-POST /api/contacorrente/login
-Content-Type: application/json
-
-{
-  "cpf": "12345678909",
-  "senha": "senha123"
-}
-```
-
-### 3. Movimentação com Idempotência
-```http
-POST /api/movimentacao
-Authorization: Bearer {token}
-X-Idempotency-Key: unique-request-id-123
-Content-Type: application/json
-
-{
-  "identificacaoRequisicao": "unique-request-id-123",
-  "valor": 100.50,
-  "tipoMovimento": "C",
-  "descricao": "Depósito inicial"
-}
-```
-
-### 4. Consulta de Saldo
-```http
-GET /api/contacorrente/saldo
-Authorization: Bearer {token}
-```
-
-## 🧪 Testes
-
+### **1. Cadastro de Conta**
 ```bash
-# Executar testes unitários
+curl -X POST "http://localhost:5081/api/contacorrente/cadastrar" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cpf": "12345678909",
+    "nome": "Maria Silva",
+    "senha": "Senha@123"
+  }'
+```
+
+### **2. Login**
+```bash
+curl -X POST "http://localhost:5081/api/contacorrente/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cpf": "12345678909",
+    "senha": "Senha@123"
+  }'
+```
+
+### **3. Transferência com Idempotência**
+```bash
+curl -X POST "http://localhost:5082/api/transferencia" \
+  -H "Authorization: Bearer {TOKEN_JWT}" \
+  -H "X-Idempotency-Key: transfer-123-abc" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "identificacaoRequisicao": "transfer-123-abc",
+    "contaDestinoId": "eyJhbGciOiJIUzI1NiIs...",
+    "valor": 150.75,
+    "descricao": "Pagamento serviço"
+  }'
+```
+
+### **4. Consulta Histórico**
+```bash
+curl -X GET "http://localhost:5082/api/transferencia/historico" \
+  -H "Authorization: Bearer {TOKEN_JWT}" \
+  -H "Content-Type: application/json"
+```
+
+## 🧪 Testando o Sistema
+
+### **Testes Unitários**
+```bash
+# Executar todos os testes
 dotnet test
 
 # Testes com cobertura
 dotnet test --collect:"XPlat Code Coverage"
 
 # Testes específicos
-dotnet test --filter "FullyQualifiedName~ContaCorrenteTests"
+dotnet test --filter "FullyQualifiedName~Transferencia"
 ```
 
-## 🚢 Deploy
-
-### Docker
+### **Testes de Integração**
 ```bash
-# Build da imagem
-docker build -t ailos-conta-corrente:latest .
+# Subir ambiente completo
+docker-compose up -d
 
-# Executar container
-docker run -d \
-  -p 8080:80 \
-  -e ENCRYPTED_ID_SECRET=${ENCRYPTED_ID_SECRET} \
-  -e JwtSettings__Secret=${JWT_SECRET} \
-  -v /path/to/data:/app/data \
-  ailos-conta-corrente:latest
+# Executar scripts de teste
+./scripts/test-integration.sh
+
+# Verificar logs
+docker-compose logs -f transferencia-api
 ```
 
-### Kubernetes (Exemplo)
+## 🔍 Monitoramento
+
+### **Health Checks**
+```bash
+# Verificar saúde das APIs
+curl http://localhost:5081/health
+curl http://localhost:5082/health
+```
+
+### **Kafka UI**
+Acesse `http://localhost:8080` para:
+- Monitorar tópicos
+- Ver mensagens em tempo real
+- Gerenciar consumidores
+
+### **Logs**
+```bash
+# Ver logs em tempo real
+docker-compose logs -f
+
+# Logs específicos
+docker-compose logs transferencia-api
+docker-compose logs conta-corrente-api
+```
+
+## 🚢 Deployment
+
+### **Ambiente de Produção**
+```bash
+# Build das imagens
+docker build -t ailos/conta-corrente:prod ./src/Ailos.ContaCorrente.Api
+docker build -t ailos/transferencia:prod ./src/Ailos.Transferencia.Api
+
+# Push para registry
+docker push ailos/conta-corrente:prod
+docker push ailos/transferencia:prod
+
+# Kubernetes (exemplo)
+kubectl apply -f k8s/production/
+```
+
+### **Variáveis de Ambiente de Produção**
+```env
+# Arquivo .env.production
+ENCRYPTED_ID_SECRET=chave-segura-producao-32-caracteres
+JwtSettings__Secret=jwt-secret-producao-minimo-32-chars
+ASPNETCORE_ENVIRONMENT=Production
+KAFKA_BOOTSTRAP_SERVERS=kafka-prod:9092
+DATABASE_CONNECTION=Server=sql-server;Database=ailos;User=sa;Password=xxx
+```
+
+## 📈 Métricas e Observabilidade
+
+### **Métricas Coletadas**
+- Taxa de transferências por segundo
+- Tempo médio de resposta
+- Taxa de erros por endpoint
+- Uso de banco de dados
+- Status do Kafka
+
+### **Alertas Configuráveis**
+- Taxa de erro > 1%
+- Latência > 500ms
+- Saúde do banco de dados
+- Consumidores Kafka offline
+
+## 🔄 CI/CD Pipeline
+
 ```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: ailos-conta-corrente
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: conta-corrente
-  template:
-    metadata:
-      labels:
-        app: conta-corrente
-    spec:
-      containers:
-      - name: api
-        image: ailos-conta-corrente:latest
-        ports:
-        - containerPort: 80
-        env:
-        - name: ENCRYPTED_ID_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: app-secrets
-              key: encrypted-id-secret
+# Exemplo GitHub Actions
+name: Ailos CI/CD
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v1
+      - name: Run tests
+        run: dotnet test
+  
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build Docker images
+        run: docker-compose build
+  
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Deploy to Production
+        run: ./scripts/deploy-prod.sh
 ```
-
-## 📈 Monitoramento
-
-### Health Checks
-```http
-GET /health
-```
-
-### Logs
-- Structured logging com Serilog (configurável)
-- Níveis: Information, Warning, Error
-- Integração com sistemas de monitoramento
-
-### Métricas
-- Request/response times
-- Error rates
-- Database connection health
-- Memory usage
 
 ## 🤝 Contribuindo
 
-1. Fork o projeto
-2. Crie uma feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
-4. Push para a branch (`git push origin feature/AmazingFeature`)
-5. Abra um Pull Request
+1. **Fork o repositório**
+2. **Crie uma branch de feature**
+   ```bash
+   git checkout -b feature/nova-funcionalidade
+   ```
+3. **Commit suas mudanças**
+   ```bash
+   git commit -m 'Adiciona nova funcionalidade'
+   ```
+4. **Push para a branch**
+   ```bash
+   git push origin feature/nova-funcionalidade
+   ```
+5. **Abra um Pull Request**
+
+### **Padrões de Código**
+- Use `PascalCase` para classes
+- Use `camelCase` para variáveis
+- Documente métodos públicos
+- Mantenha cobertura de testes > 80%
 
 ## 📄 Licença
 
-Distribuído sob licença MIT. Veja `LICENSE` para mais informações.
+Este projeto está licenciado sob a **Licença MIT** - veja o arquivo [LICENSE](LICENSE) para detalhes.
 
 ## 🆘 Suporte
 
-- **Issues**: [GitHub Issues](https://github.com/seu-usuario/ailos-conta-corrente/issues)
-- **Email**: enzovieira.trabalho@outlook.com
-- **Documentação**: [Swagger UI](http://localhost:5081/swagger)
+- **Documentação**: [docs.ailosbank.com](https://docs.ailosbank.com)
+- **Issues**: [GitHub Issues](https://github.com/seu-usuario/ailos-banking/issues)
+- **Email**: suporte@ailosbank.com
+- **Slack**: #ailos-developers
+
+## 🏆 Diferenciais Técnicos
+
+### **Para a Vaga de Sênior**
+1. **Arquitetura de Microsserviços** - Comunicação via HTTP + Kafka
+2. **Transações Distribuídas** - Com rollback automático
+3. **Idempotência Garantida** - Middleware + service layer
+4. **Ofuscação de IDs** - Segurança adicional
+5. **Containerização Completa** - Docker + Docker Compose
+6. **Kafka Integration** - Mensageria assíncrona
+7. **Health Checks** - Monitoramento nativo
+8. **DDD & Clean Architecture** - Separação de responsabilidades
 
 ---
 
 <div align="center">
-  <p><strong>Desenvolvido com ❤️ pela Equipe Ailos</strong></p>
-  <p><sub>Soluções bancárias seguras, escaláveis e de alta performance</sub></p>
+
+## 🏦 **Ailos Banking System**
+**Soluções bancárias modernas, seguras e escaláveis**
+
+[![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
+[![Docker](https://img.shields.io/badge/Docker-✓-2496ED?logo=docker)](https://docker.com)
+[![Kafka](https://img.shields.io/badge/Kafka-✓-231F20?logo=apachekafka)](https://kafka.apache.org/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+**Desenvolvido com excelência técnica para desafios reais do mercado financeiro**
+
 </div>
