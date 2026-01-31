@@ -10,20 +10,38 @@ services:
     networks:
       - ailos-network
 
-  encrypted-id-test-api:
-    build:
-      context: .
-      dockerfile: src/Ailos.EncryptedId.TestApi/Dockerfile
-    container_name: ailos-encrypted-id-test-api
-    ports:
-      - "5080:80"
-    env_file:
-      - .env
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ASPNETCORE_URLS=http://+:80
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - ailos-network
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
     depends_on:
-      - sqlite-db
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - ailos-network
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
     networks:
       - ailos-network
 
@@ -38,8 +56,8 @@ services:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=http://+:80
       - ConnectionStrings__DefaultConnection=Data Source=/app/data/ailos.db
-      - ENCRYPTED_ID_SECRET=ENCRYPTED_ID_SECRET
-      - JwtSettings__Secret=JwtSettings__Secret
+      - ENCRYPTED_ID_SECRET=${ENCRYPTED_ID_SECRET}
+      - JwtSettings__Secret=${JwtSettings__Secret}
       - JwtSettings__Issuer=AilosContaCorrenteApi
       - JwtSettings__Audience=AilosClient
       - JwtSettings__ExpirationMinutes=60
@@ -48,9 +66,42 @@ services:
       - ./scripts/sql:/app/scripts/sql
     depends_on:
       - sqlite-db
+      - kafka
+    networks:
+      - ailos-network
+
+  transferencia-api:
+    build:
+      context: .
+      dockerfile: src/Ailos.Transferencia.Api/Dockerfile
+    container_name: ailos-transferencia-api
+    ports:
+      - "5082:80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:80
+      - ConnectionStrings__DefaultConnection=Data Source=/app/data/transferencia.db
+      - ENCRYPTED_ID_SECRET=${ENCRYPTED_ID_SECRET}
+      - JwtSettings__Secret=${JwtSettings__Secret}
+      - JwtSettings__Issuer=AilosTransferenciaApi
+      - JwtSettings__Audience=AilosClient
+      - JwtSettings__ExpirationMinutes=60
+      - Kafka__BootstrapServers=kafka:9092
+      - Kafka__TransferenciasTopic=transferencias-realizadas
+      - Kafka__TarifasTopic=tarifas-realizadas
+      - ContaCorrenteApi__BaseUrl=http://conta-corrente-api:80
+      - TarifaConfig__ValorTarifa=2.00
+    volumes:
+      - ./data:/app/data
+      - ./scripts/sql:/app/scripts/sql
+    depends_on:
+      - sqlite-db
+      - conta-corrente-api
+      - kafka
     networks:
       - ailos-network
 
 networks:
   ailos-network:
     driver: bridge
+    
