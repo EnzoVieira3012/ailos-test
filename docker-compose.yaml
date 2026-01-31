@@ -101,7 +101,52 @@ services:
     networks:
       - ailos-network
 
-networks:
-  ailos-network:
-    driver: bridge
-    
+  tarifa-worker:
+    build:
+      context: .
+      dockerfile: src/Ailos.Tarifa.Worker/Dockerfile
+    container_name: ailos-tarifa-worker
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:80
+      - ConnectionStrings__DefaultConnection=Data Source=/app/data/tarifas.db
+      - Kafka__BootstrapServers=kafka:9092
+      - Kafka__TransferenciasTopic=transferencias-realizadas
+      - Kafka__TarifasTopic=tarifas-processadas
+      - Kafka__ConsumerGroup=tarifa-worker-group
+      - ContaCorrenteApi__BaseUrl=http://conta-corrente-api:80
+      - TarifaConfig__ValorTarifaMinima=0.01
+      - TarifaConfig__MaxTentativas=3
+      - TarifaConfig__DelayEntreTentativasMs=1000
+    volumes:
+      - ./data:/app/data
+      - ./logs/tarifa-worker:/app/logs
+      - ./scripts/sql:/app/scripts/sql
+    depends_on:
+      - kafka
+      - conta-corrente-api
+      - transferencia-api
+    networks:
+      - ailos-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "dotnet", "Ailos.Tarifa.Worker.dll", "--check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  tarifa-test-consumer:
+    image: confluentinc/cp-kafkacat:latest
+    container_name: ailos-tarifa-test-consumer
+    command: |
+      bash -c "
+        echo 'Aguardando Kafka...'
+        sleep 10
+        echo 'Consumindo tópico tarifas-processadas...'
+        kafkacat -b kafka:9092 -t tarifas-processadas -C -o beginning
+      "
+    depends_on:
+      - kafka
+      - tarifa-worker
+    networks:
+      - ailos-network
