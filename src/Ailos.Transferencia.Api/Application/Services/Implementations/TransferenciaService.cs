@@ -2,11 +2,12 @@ using System.Text.Json;
 using Ailos.Transferencia.Api.Application.DTOs.Transferencia;
 using Ailos.Transferencia.Api.Domain.Entities;
 using Ailos.Transferencia.Api.Infrastructure.Clients;
-using Ailos.Transferencia.Api.Infrastructure.Kafka;
 using Ailos.Transferencia.Api.Infrastructure.Repositories;
 using Ailos.EncryptedId;
 using Microsoft.Extensions.Options;
 using Ailos.Common.Domain.Exceptions;
+using Microsoft.Extensions.Logging;
+using Ailos.Common.Messaging;
 
 namespace Ailos.Transferencia.Api.Application.Services;
 
@@ -18,6 +19,7 @@ public sealed class TransferenciaService : ITransferenciaService
     private readonly IEncryptedIdService _encryptedIdService;
     private readonly IKafkaProducerService _kafkaProducerService;
     private readonly TarifaConfig _tarifaConfig;
+    private readonly ILogger<TransferenciaService> _logger;
 
     public TransferenciaService(
         ITransferenciaRepository transferenciaRepository,
@@ -25,7 +27,8 @@ public sealed class TransferenciaService : ITransferenciaService
         IContaCorrenteClient contaCorrenteClient,
         IEncryptedIdService encryptedIdService,
         IKafkaProducerService kafkaProducerService,
-        IOptions<TarifaConfig> tarifaConfig)
+        IOptions<TarifaConfig> tarifaConfig,
+        ILogger<TransferenciaService> logger)
     {
         _transferenciaRepository = transferenciaRepository;
         _idempotenciaService = idempotenciaService;
@@ -33,6 +36,7 @@ public sealed class TransferenciaService : ITransferenciaService
         _encryptedIdService = encryptedIdService;
         _kafkaProducerService = kafkaProducerService;
         _tarifaConfig = tarifaConfig.Value;
+        _logger = logger;
     }
 
     public async Task<TransferenciaResponse> CriarTransferenciaAsync(
@@ -40,9 +44,12 @@ public sealed class TransferenciaService : ITransferenciaService
         TransferenciaRequest request,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("Iniciando transferência para conta {ContaOrigem}", contaIdUsuarioLogado);
+
         // 1. Verificar idempotência
         if (await _idempotenciaService.RequisicaoJaProcessadaAsync(request.IdentificacaoRequisicao, cancellationToken))
         {
+            _logger.LogWarning("Requisição idempotente detectada: {Identificacao}", request.IdentificacaoRequisicao);
             return await ProcessarRequisicaoIdempotente(request.IdentificacaoRequisicao, cancellationToken);
         }
 
@@ -58,6 +65,8 @@ public sealed class TransferenciaService : ITransferenciaService
             // 3. Descriptografar IDs
             var contaDestinoId = _encryptedIdService.Decrypt(request.ContaDestinoId);
 
+            _logger.LogDebug("Conta destino decriptada: {ContaDestinoId}", contaDestinoId);
+
             // 4. Validar transferência
             ValidarTransferencia(contaIdUsuarioLogado, contaDestinoId, request.Valor);
 
@@ -72,14 +81,17 @@ public sealed class TransferenciaService : ITransferenciaService
             if (_tarifaConfig.ValorTarifa > 0)
             {
                 transferencia.AplicarTarifa(_tarifaConfig.ValorTarifa);
+                _logger.LogDebug("Tarifa aplicada: R$ {Tarifa}", _tarifaConfig.ValorTarifa);
             }
 
             // 7. Salvar transferência inicial
             var transferenciaSalva = await _transferenciaRepository.InserirAsync(transferencia, cancellationToken);
+            _logger.LogInformation("Transferência salva no banco: ID {TransferenciaId}", transferenciaSalva.Id);
 
             try
             {
                 // 8. Realizar débito na conta de origem
+                _logger.LogDebug("Realizando débito na conta de origem {ContaOrigem}", contaIdUsuarioLogado);
                 await _contaCorrenteClient.RealizarMovimentacaoAsync(
                     contaIdUsuarioLogado,
                     "D",
@@ -89,6 +101,7 @@ public sealed class TransferenciaService : ITransferenciaService
                     cancellationToken);
 
                 // 9. Realizar crédito na conta de destino
+                _logger.LogDebug("Realizando crédito na conta de destino {ContaDestino}", contaDestinoId);
                 await _contaCorrenteClient.RealizarMovimentacaoAsync(
                     contaDestinoId,
                     "C",
@@ -114,10 +127,14 @@ public sealed class TransferenciaService : ITransferenciaService
                     SerializarResultado(response),
                     cancellationToken);
 
+                _logger.LogInformation("Transferência concluída com sucesso: {TransferenciaId}", transferenciaSalva.Id);
+
                 return response;
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Erro durante processamento da transferência. Realizando estorno...");
+
                 // 14. Em caso de erro, fazer estorno
                 await RealizarEstorno(contaIdUsuarioLogado, request.Valor, cancellationToken);
 
@@ -137,6 +154,8 @@ public sealed class TransferenciaService : ITransferenciaService
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Erro inicial na transferência");
+
             // Registrar falha inicial na idempotência
             await _idempotenciaService.RegistrarAsync(
                 request.IdentificacaoRequisicao,
@@ -152,23 +171,47 @@ public sealed class TransferenciaService : ITransferenciaService
         long contaId,
         CancellationToken cancellationToken = default)
     {
-        return await _transferenciaRepository.ObterPorContaAsync(contaId, cancellationToken);
+        _logger.LogDebug("Obtendo transferências para conta {ContaId}", contaId);
+
+        var transferencias = await _transferenciaRepository.ObterPorContaAsync(contaId, cancellationToken);
+
+        _logger.LogInformation("Retornadas {Quantidade} transferências para conta {ContaId}",
+            transferencias.Count(), contaId);
+
+        return transferencias;
     }
 
     // Métodos privados auxiliares
     private void ValidarTransferencia(long contaOrigemId, long contaDestinoId, decimal valor)
     {
         if (contaOrigemId == contaDestinoId)
+        {
+            _logger.LogWarning("Conta de origem e destino iguais: {ContaId}", contaOrigemId);
             throw new ValidationException("Conta de origem e destino não podem ser iguais");
+        }
 
         if (valor <= 0)
+        {
+            _logger.LogWarning("Valor inválido: {Valor}", valor);
             throw new ValidationException("Valor deve ser positivo");
+        }
+
+        if (valor > 1000000) // Limite máximo de transferência
+        {
+            _logger.LogWarning("Valor excede limite máximo: {Valor}", valor);
+            throw new ValidationException("Valor máximo para transferência é R$ 1.000.000,00");
+        }
+
+        _logger.LogDebug("Validação de transferência aprovada: Origem={ContaOrigem}, Destino={ContaDestino}, Valor={Valor}",
+            contaOrigemId, contaDestinoId, valor);
     }
 
     private async Task<TransferenciaResponse> ProcessarRequisicaoIdempotente(
         string identificacaoRequisicao,
         CancellationToken cancellationToken)
     {
+        _logger.LogInformation("Processando requisição idempotente: {Identificacao}", identificacaoRequisicao);
+
         var resultadoAnterior = await _idempotenciaService.ObterResultadoAsync(
             identificacaoRequisicao, cancellationToken);
 
@@ -178,8 +221,12 @@ public sealed class TransferenciaService : ITransferenciaService
 
             if (resultado?.Erro != null)
             {
+                _logger.LogWarning("Requisição anterior falhou: {Erro}", resultado.Erro);
                 throw new InvalidOperationException($"Requisição anterior falhou: {resultado.Erro}");
             }
+
+            _logger.LogInformation("Retornando resultado idempotente da transferência {TransferenciaId}",
+                resultado?.TransferenciaId);
 
             return new TransferenciaResponse
             {
@@ -193,6 +240,7 @@ public sealed class TransferenciaService : ITransferenciaService
             };
         }
 
+        _logger.LogError("Requisição idempotente sem resultado: {Identificacao}", identificacaoRequisicao);
         throw new InvalidOperationException("Requisição idempotente sem resultado");
     }
 
@@ -200,6 +248,8 @@ public sealed class TransferenciaService : ITransferenciaService
     {
         try
         {
+            _logger.LogWarning("Realizando estorno para conta {ContaId} no valor de R$ {Valor}", contaId, valor);
+
             await _contaCorrenteClient.RealizarMovimentacaoAsync(
                 contaId,
                 "C",
@@ -207,11 +257,17 @@ public sealed class TransferenciaService : ITransferenciaService
                 "Estorno de transferência",
                 Guid.NewGuid().ToString(),
                 cancellationToken);
+
+            _logger.LogInformation("Estorno realizado com sucesso para conta {ContaId}", contaId);
         }
         catch (Exception ex)
         {
-            // Log do erro de estorno, mas não propagar
-            Console.WriteLine($"Erro ao realizar estorno: {ex.Message}");
+            // Log do erro de estorno, mas não propagar para não interromper o fluxo principal
+            _logger.LogCritical(ex, "CRÍTICO: Falha ao realizar estorno para conta {ContaId}. Valor não estornado: R$ {Valor}",
+                contaId, valor);
+
+            // Aqui poderíamos enviar uma notificação para a equipe de suporte
+            // ou registrar em um sistema de monitoramento
         }
     }
 
@@ -219,21 +275,35 @@ public sealed class TransferenciaService : ITransferenciaService
         TransferenciaEntity transferencia,
         CancellationToken cancellationToken)
     {
-        var mensagem = new TransferenciaKafkaMessage
+        try
         {
-            TransferenciaId = transferencia.Id,
-            ContaOrigemId = transferencia.ContaCorrenteOrigemId,
-            ContaDestinoId = transferencia.ContaCorrenteDestinoId,
-            Valor = transferencia.Valor,
-            TarifaAplicada = transferencia.TarifaAplicada ?? 0,
-            DataMovimento = transferencia.DataMovimento
-        };
+            var mensagem = new TransferenciaKafkaMessage
+            {
+                TransferenciaId = transferencia.Id,
+                ContaOrigemId = transferencia.ContaCorrenteOrigemId,
+                ContaDestinoId = transferencia.ContaCorrenteDestinoId,
+                Valor = transferencia.Valor,
+                TarifaAplicada = transferencia.TarifaAplicada ?? 0,
+                DataMovimento = transferencia.DataMovimento
+            };
 
-        await _kafkaProducerService.ProduzirMensagemAsync(
-            "transferencias-realizadas",
-            transferencia.Id.ToString(),
-            mensagem,
-            cancellationToken);
+            _logger.LogDebug("Publicando transferência no Kafka: {TransferenciaId}", transferencia.Id);
+
+            await _kafkaProducerService.PublishAsync(
+                "transferencias-realizadas",
+                transferencia.Id.ToString(),
+                mensagem,
+                cancellationToken);
+
+
+            _logger.LogInformation("Transferência publicada no Kafka com sucesso: {TransferenciaId}", transferencia.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao publicar transferência no Kafka: {TransferenciaId}", transferencia.Id);
+            // Não propagamos o erro para não falhar a transferência por causa do Kafka
+            // Em produção, poderíamos implementar uma fila de retry ou dead-letter queue
+        }
     }
 
     private TransferenciaResponse CriarResponse(
@@ -241,6 +311,8 @@ public sealed class TransferenciaService : ITransferenciaService
         long contaOrigemId,
         long contaDestinoId)
     {
+        _logger.LogDebug("Criando resposta para transferência {TransferenciaId}", transferencia.Id);
+
         return new TransferenciaResponse
         {
             TransferenciaId = _encryptedIdService.Encrypt(transferencia.Id),
@@ -270,6 +342,8 @@ public sealed class TransferenciaService : ITransferenciaService
     private string SerializarErro(Exception ex)
     {
         var errorType = ex is DomainException domainEx ? domainEx.ErrorCode : "INTERNAL_ERROR";
+
+        _logger.LogDebug("Serializando erro: {ErrorType} - {Message}", errorType, ex.Message);
 
         return JsonSerializer.Serialize(new ResultadoIdempotencia
         {

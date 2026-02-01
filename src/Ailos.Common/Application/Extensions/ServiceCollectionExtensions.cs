@@ -3,6 +3,7 @@ using Ailos.Common.Domain.Exceptions;
 using Ailos.Common.Infrastructure.Data;
 using Ailos.Common.Infrastructure.Security;
 using Ailos.Common.Infrastructure.Security.Extensions;
+using Ailos.Common.Messaging;
 using Ailos.Common.Presentation.Filters;
 using DotNetEnv;
 using Microsoft.Extensions.Configuration;
@@ -98,22 +99,34 @@ public static class ServiceCollectionExtensions
     }
 
     public static IServiceCollection AddAilosKafka(
-        this IServiceCollection services,
-        IConfiguration configuration)
+    this IServiceCollection services,
+    IConfiguration configuration)
     {
-        var kafkaSettings = new KafkaSettings();
-        configuration.GetSection(KafkaSettings.SectionName).Bind(kafkaSettings);
+        // Bind padrão via Options
+        services.Configure<KafkaSettings>(
+            configuration.GetSection(KafkaSettings.SectionName));
 
-        // Sobrescrever com variáveis de ambiente se existirem
-        kafkaSettings.BootstrapServers = Environment.GetEnvironmentVariable("KAFKA_BOOTSTRAP_SERVERS")
-            ?? kafkaSettings.BootstrapServers;
-        kafkaSettings.TransferenciasTopic = Environment.GetEnvironmentVariable("KAFKA_TRANSFERENCIAS_TOPIC")
-            ?? kafkaSettings.TransferenciasTopic;
-        kafkaSettings.TarifasTopic = Environment.GetEnvironmentVariable("KAFKA_TARIFAS_TOPIC")
-            ?? kafkaSettings.TarifasTopic;
+        // Override via .env (se existir)
+        services.PostConfigure<KafkaSettings>(settings =>
+        {
+            settings.BootstrapServers =
+                Environment.GetEnvironmentVariable("KAFKA_BOOTSTRAP_SERVERS")
+                ?? settings.BootstrapServers;
 
-        services.AddSingleton(kafkaSettings);
+            settings.TransferenciasTopic =
+                Environment.GetEnvironmentVariable("KAFKA_TRANSFERENCIAS_TOPIC")
+                ?? settings.TransferenciasTopic;
+
+            settings.TarifasTopic =
+                Environment.GetEnvironmentVariable("KAFKA_TARIFAS_TOPIC")
+                ?? settings.TarifasTopic;
+        });
+
+        // Infra Kafka
+        services.AddSingleton<KafkaConnectionFactory>();
+        services.AddSingleton<IKafkaProducerService, KafkaProducerService>();
 
         return services;
     }
+
 }

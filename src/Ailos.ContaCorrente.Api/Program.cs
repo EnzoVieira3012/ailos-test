@@ -186,7 +186,15 @@ try
         Log.Debug("Swagger UI habilitado para desenvolvimento");
     }
 
-    app.MapHealthChecks("/health");
+    // 🔴 CORREÇÃO: Endpoint de health check SIMPLES e SEM autenticação
+    app.MapGet("/health", () => Results.Json(new 
+    { 
+        status = "healthy", 
+        timestamp = DateTime.UtcNow,
+        service = "conta-corrente-api"
+    }));
+    
+    app.MapGet("/healthz", () => "OK");
 
     // ⚠️ ORDEM CORRETA
     app.UseAuthentication();

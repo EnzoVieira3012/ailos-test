@@ -8,6 +8,8 @@ using Ailos.Common.Infrastructure.Data;
 using DotNetEnv;
 using Serilog;
 using Serilog.Events;
+using Microsoft.AspNetCore.Http;
+using Polly;
 
 // 🔥 CONFIGURAÇÃO DE LOGS DETALHADA
 Log.Logger = new LoggerConfiguration()
@@ -69,8 +71,19 @@ try
         TarifasTopic = Environment.GetEnvironmentVariable("KAFKA_TARIFAS_TOPIC") ?? "tarifas-processadas",
         ConsumerGroup = Environment.GetEnvironmentVariable("KAFKA_CONSUMER_GROUP") ?? "tarifa-worker-group"
     };
-    
+
+    // Configurar retry policy para Kafka
+    var retryPolicy = Policy
+        .Handle<Exception>()
+        .WaitAndRetryForeverAsync(
+            retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
+            (exception, timeSpan) =>
+            {
+                Log.Warning(exception, "❌ Falha na conexão com Kafka. Tentando novamente em {TimeSpan}", timeSpan);
+            });
+
     builder.Services.AddSingleton(kafkaConfig);
+    builder.Services.AddSingleton<IAsyncPolicy>(retryPolicy);
     Log.Information("✅ Kafka configurado - Servers: {Servers}, Tópico: {Topic}, Group: {Group}", 
         kafkaConfig.BootstrapServers, kafkaConfig.TransferenciasTopic, kafkaConfig.ConsumerGroup);
 
@@ -111,9 +124,15 @@ try
     builder.Services.AddHostedService<Worker>();
     Log.Information("👷 Worker registrado como serviço hospedado");
 
+    // ================= CONSTRUIR HOST =================
     var host = builder.Build();
     
     Log.Information("🏗️ Host construído com sucesso");
+
+    // Adicione logging de requests HTTP para o worker
+    // Como é um worker, não temos HTTP pipeline, mas podemos adicionar logging para HTTP calls
+    var httpClient = host.Services.GetRequiredService<IContaCorrenteClient>();
+    Log.Debug("🔗 HTTP Client registrado para chamadas à API de conta corrente");
 
     // ================= INICIALIZAR BANCO DE DADOS =================
     Log.Information("🔄 Inicializando banco de dados...");
@@ -147,7 +166,7 @@ static async Task InitializeDatabase(IServiceProvider services)
     {
         using var scope = services.CreateScope();
         var connectionFactory = scope.ServiceProvider.GetRequiredService<IDbConnectionFactory>();
-        var logger = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Program>>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
         using var connection = connectionFactory.CreateConnection();
         connection.Open();
@@ -196,20 +215,44 @@ static async Task InitializeDatabase(IServiceProvider services)
 
         using var command = connection.CreateCommand();
         command.CommandText = sql;
-        command.ExecuteNonQuery();
+        var result = command.ExecuteNonQuery();
         
-        logger.LogInformation("✅ Tabelas de tarifa criadas/verificadas");
+        logger.LogInformation("✅ Tabelas de tarifa criadas/verificadas. Resultado: {Result}", result);
         
         // Contar registros existentes
-        using var countCommand = connection.CreateCommand();
-        countCommand.CommandText = "SELECT COUNT(*) FROM tarifa";
-        var tarifaCount = countCommand.ExecuteScalar();
+        try
+        {
+            using var countCommand = connection.CreateCommand();
+            countCommand.CommandText = "SELECT COUNT(*) FROM tarifa";
+            var tarifaCount = countCommand.ExecuteScalar();
+            
+            countCommand.CommandText = "SELECT COUNT(*) FROM tarifa_processada";
+            var historicoCount = countCommand.ExecuteScalar();
+            
+            logger.LogInformation("📊 Estatísticas - Tarifas: {TarifaCount}, Histórico: {HistoricoCount}", 
+                tarifaCount, historicoCount);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "ℹ️ Tabelas ainda vazias ou erro na contagem");
+        }
         
-        countCommand.CommandText = "SELECT COUNT(*) FROM tarifa_processada";
-        var historicoCount = countCommand.ExecuteScalar();
+        // Verificar se as tabelas foram criadas
+        using var checkCommand = connection.CreateCommand();
+        checkCommand.CommandText = @"
+            SELECT name FROM sqlite_master 
+            WHERE type='table' 
+            AND name IN ('tarifa', 'tarifa_processada')
+            ORDER BY name";
         
-        logger.LogInformation("📊 Estatísticas - Tarifas: {TarifaCount}, Histórico: {HistoricoCount}", 
-            tarifaCount, historicoCount);
+        using var reader = checkCommand.ExecuteReader();
+        var tables = new List<string>();
+        while (reader.Read())
+        {
+            tables.Add(reader.GetString(0));
+        }
+        
+        logger.LogInformation("📊 Tabelas de tarifa existentes: {@Tables}", tables);
     }
     catch (Exception ex)
     {
@@ -225,4 +268,43 @@ public class TarifaConfig
     public decimal ValorTarifaMinima { get; set; } = 0.01m;
     public int MaxTentativas { get; set; } = 3;
     public int DelayEntreTentativasMs { get; set; } = 1000;
+}
+
+// ================= MIDDLEWARE DE LOGGING =================
+
+public class RequestLoggingMiddleware
+{
+    private readonly RequestDelegate _next;
+    private readonly ILogger<RequestLoggingMiddleware> _logger;
+
+    public RequestLoggingMiddleware(RequestDelegate next, ILogger<RequestLoggingMiddleware> logger)
+    {
+        _next = next;
+        _logger = logger;
+    }
+
+    public async Task InvokeAsync(HttpContext context)
+    {
+        var startTime = DateTime.UtcNow;
+        var request = context.Request;
+        
+        _logger.LogInformation("➡️ Request recebida: {Method} {Path} {QueryString}", 
+            request.Method, request.Path, request.QueryString);
+        
+        try
+        {
+            await _next(context);
+            
+            var duration = DateTime.UtcNow - startTime;
+            _logger.LogInformation("⬅️ Response enviada: {Method} {Path} - {StatusCode} em {Duration}ms", 
+                request.Method, request.Path, context.Response.StatusCode, duration.TotalMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            var duration = DateTime.UtcNow - startTime;
+            _logger.LogError(ex, "❌ Erro durante request: {Method} {Path} - Falhou após {Duration}ms", 
+                request.Method, request.Path, duration.TotalMilliseconds);
+            throw;
+        }
+    }
 }
