@@ -1,5 +1,4 @@
-// src/Ailos.ContaCorrente.Api/Presentation/Controllers/IdempotenciaController.cs
-using Ailos.ContaCorrente.Api.Application.Services;
+using Ailos.ContaCorrente.Api.Application.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

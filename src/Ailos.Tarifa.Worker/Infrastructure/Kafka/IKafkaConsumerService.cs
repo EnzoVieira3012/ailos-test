@@ -10,10 +10,11 @@ public interface IKafkaConsumerService
 
 public sealed class KafkaConsumerService : IKafkaConsumerService
 {
-    private readonly IConsumer<string, string> _consumer;
+    private readonly IConsumer<string, string>? _consumer;
     private readonly Application.Services.ITarifaProcessor _tarifaProcessor;
     private readonly ILogger<KafkaConsumerService> _logger;
     private readonly KafkaConfig _config;
+    private bool _disposed;
 
     public KafkaConsumerService(
         KafkaConfig config,
@@ -24,28 +25,40 @@ public sealed class KafkaConsumerService : IKafkaConsumerService
         _tarifaProcessor = tarifaProcessor;
         _logger = logger;
 
-        var consumerConfig = new ConsumerConfig
+        try
         {
-            BootstrapServers = config.BootstrapServers,
-            GroupId = config.ConsumerGroup,
-            AutoOffsetReset = AutoOffsetReset.Earliest,
-            EnableAutoCommit = false,
-            EnableAutoOffsetStore = false
-        };
+            var consumerConfig = new ConsumerConfig
+            {
+                BootstrapServers = _config.BootstrapServers,
+                GroupId = _config.ConsumerGroup,
+                AutoOffsetReset = AutoOffsetReset.Earliest,
+                EnableAutoCommit = false,
+                EnableAutoOffsetStore = false
+            };
 
-        _consumer = new ConsumerBuilder<string, string>(consumerConfig)
-            .SetErrorHandler((_, error) =>
-                _logger.LogError("Erro no Kafka Consumer: {Reason}", error.Reason))
-            .SetLogHandler((_, logMessage) =>
-                _logger.LogDebug("Kafka Log: {Message} (Level: {Level})", 
-                    logMessage.Message, logMessage.Level))
-            .Build();
+            _consumer = new ConsumerBuilder<string, string>(consumerConfig)
+                .SetErrorHandler((_, error) =>
+                    _logger.LogError("Erro no Kafka Consumer: {Reason}", error.Reason))
+                .Build();
+                
+            _logger.LogInformation("Kafka Consumer criado para servidor: {BootstrapServers}", _config.BootstrapServers);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao criar Kafka Consumer");
+            _consumer = null;
+        }
     }
 
     public async Task ConsumeAsync(CancellationToken cancellationToken)
     {
-        _consumer.Subscribe(_config.TransferenciasTopic);
+        if (_consumer == null)
+        {
+            _logger.LogError("Kafka Consumer não inicializado");
+            return;
+        }
 
+        _consumer.Subscribe(_config.TransferenciasTopic);
         _logger.LogInformation("Iniciando consumo do tópico: {Topic}", _config.TransferenciasTopic);
 
         while (!cancellationToken.IsCancellationRequested)
@@ -111,9 +124,22 @@ public sealed class KafkaConsumerService : IKafkaConsumerService
 
     public void Dispose()
     {
-        _consumer?.Close();
-        _consumer?.Dispose();
-        _logger.LogInformation("Kafka Consumer finalizado");
+        if (_disposed) return;
+        
+        try
+        {
+            _consumer?.Close();
+            _consumer?.Dispose();
+            _logger.LogInformation("Kafka Consumer finalizado");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao finalizar Kafka Consumer");
+        }
+        finally
+        {
+            _disposed = true;
+        }
     }
 }
 
@@ -123,6 +149,4 @@ public class KafkaConfig
     public string TransferenciasTopic { get; set; } = "transferencias-realizadas";
     public string TarifasTopic { get; set; } = "tarifas-processadas";
     public string ConsumerGroup { get; set; } = "tarifa-worker-group";
-    public int RetryCount { get; set; } = 3;
-    public int RetryDelayMs { get; set; } = 1000;
 }

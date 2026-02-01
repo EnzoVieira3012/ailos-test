@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/dotnet/runtime:8.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 WORKDIR /app
 EXPOSE 80
 
@@ -6,6 +6,7 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 COPY ["src/Ailos.Tarifa.Worker/Ailos.Tarifa.Worker.csproj", "src/Ailos.Tarifa.Worker/"]
 COPY ["src/Ailos.EncryptedId/Ailos.EncryptedId.csproj", "src/Ailos.EncryptedId/"]
+COPY ["src/Ailos.Common/Ailos.Common.csproj", "src/Ailos.Common/"]
 RUN dotnet restore "src/Ailos.Tarifa.Worker/Ailos.Tarifa.Worker.csproj"
 COPY . .
 WORKDIR "/src/src/Ailos.Tarifa.Worker"

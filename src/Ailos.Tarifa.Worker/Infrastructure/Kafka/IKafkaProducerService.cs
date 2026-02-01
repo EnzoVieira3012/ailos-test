@@ -14,31 +14,44 @@ public interface IKafkaProducerService
 
 public sealed class KafkaProducerService : IKafkaProducerService, IDisposable
 {
-    private readonly IProducer<string, string> _producer;
+    private readonly IProducer<string, string>? _producer;
     private readonly ILogger<KafkaProducerService> _logger;
+    private readonly KafkaConfig _config;
+    private bool _disposed;
 
     public KafkaProducerService(
         KafkaConfig config,
         ILogger<KafkaProducerService> logger)
     {
+        _config = config;
         _logger = logger;
-        
-        var producerConfig = new ProducerConfig
+
+        try
         {
-            BootstrapServers = config.BootstrapServers,
-            Acks = Acks.All,
-            EnableIdempotence = true,
-            MessageSendMaxRetries = 3,
-            RetryBackoffMs = 100,
-            LingerMs = 5
-        };
-        
-        _producer = new ProducerBuilder<string, string>(producerConfig)
-            .SetKeySerializer(Serializers.Utf8)
-            .SetValueSerializer(Serializers.Utf8)
-            .SetErrorHandler((_, error) =>
-                _logger.LogError("Erro no Kafka Producer: {Reason}", error.Reason))
-            .Build();
+            var producerConfig = new ProducerConfig
+            {
+                BootstrapServers = _config.BootstrapServers,
+                Acks = Acks.All,
+                EnableIdempotence = true,
+                MessageSendMaxRetries = 3,
+                RetryBackoffMs = 100,
+                LingerMs = 5
+            };
+            
+            _producer = new ProducerBuilder<string, string>(producerConfig)
+                .SetKeySerializer(Serializers.Utf8)
+                .SetValueSerializer(Serializers.Utf8)
+                .SetErrorHandler((_, error) =>
+                    _logger.LogError("Erro no Kafka Producer: {Reason}", error.Reason))
+                .Build();
+                
+            _logger.LogInformation("Kafka Producer criado para servidor: {BootstrapServers}", _config.BootstrapServers);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao criar Kafka Producer");
+            _producer = null;
+        }
     }
 
     public async Task ProduzirMensagemAsync<T>(
@@ -47,6 +60,12 @@ public sealed class KafkaProducerService : IKafkaProducerService, IDisposable
         T message,
         CancellationToken cancellationToken = default)
     {
+        if (_producer == null)
+        {
+            _logger.LogError("Kafka Producer não inicializado");
+            return;
+        }
+
         try
         {
             var messageJson = JsonSerializer.Serialize(message);
@@ -79,8 +98,21 @@ public sealed class KafkaProducerService : IKafkaProducerService, IDisposable
 
     public void Dispose()
     {
-        _producer?.Flush(TimeSpan.FromSeconds(5));
-        _producer?.Dispose();
-        _logger.LogInformation("Kafka Producer finalizado");
+        if (_disposed) return;
+        
+        try
+        {
+            _producer?.Flush(TimeSpan.FromSeconds(5));
+            _producer?.Dispose();
+            _logger.LogInformation("Kafka Producer finalizado");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao finalizar Kafka Producer");
+        }
+        finally
+        {
+            _disposed = true;
+        }
     }
 }

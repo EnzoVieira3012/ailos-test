@@ -1,14 +1,16 @@
-namespace Ailos.ContaCorrente.Api.Domain.ValueObjects;
+// Senha.cs - CORRIGIDO
+using BCrypt.Net; // Adicione este using
 
 public sealed record Senha
 {
     public string Hash { get; }
-    public string Salt { get; }
+    
+    // REMOVA o Salt - BCrypt já gerencia isso internamente
+    // public string Salt { get; }
 
-    private Senha(string hash, string salt)
+    private Senha(string hash)
     {
         Hash = hash;
-        Salt = salt;
     }
 
     public static Senha Criar(string senhaTexto)
@@ -16,14 +18,17 @@ public sealed record Senha
         if (string.IsNullOrWhiteSpace(senhaTexto) || senhaTexto.Length < 6)
             throw new ArgumentException("Senha deve ter no mínimo 6 caracteres");
 
-        var salt = BCrypt.Net.BCrypt.GenerateSalt(12);
-        var hash = BCrypt.Net.BCrypt.HashPassword(senhaTexto, salt);
+        // BCrypt gera o hash com salt embutido automaticamente
+        var hash = BCrypt.Net.BCrypt.HashPassword(senhaTexto);
+        
+        // Hash inclui: $2a$12$ + salt (22 chars) + hash (31 chars)
+        // Exemplo: "$2a$12$R9h/cIPz0gi.URNNX3kh2OPST9/PgBkqquzi.Ss7KIUgO2t0jWMUW"
 
-        return new Senha(hash, salt);
+        return new Senha(hash);
     }
 
-    public static Senha Recriar(string hash, string salt) =>
-        new(hash, salt);
+    public static Senha Recriar(string hash) =>
+        new(hash); // Agora só recebe o hash
 
     public bool Validar(string senhaTexto) =>
         BCrypt.Net.BCrypt.Verify(senhaTexto, Hash);
