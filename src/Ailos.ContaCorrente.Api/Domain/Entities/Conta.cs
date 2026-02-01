@@ -1,4 +1,4 @@
-using Ailos.ContaCorrente.Api.Domain.ValueObjects;
+using Ailos.Common.Domain.ValueObjects;
 
 namespace Ailos.ContaCorrente.Api.Domain.Entities;
 

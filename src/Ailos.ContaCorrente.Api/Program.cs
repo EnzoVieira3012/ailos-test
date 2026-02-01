@@ -1,252 +1,302 @@
-using Ailos.ContaCorrente.Api.Application.Services;
-using Ailos.ContaCorrente.Api.Infrastructure.Data;
-using Ailos.ContaCorrente.Api.Infrastructure.Repositories;
-using Ailos.ContaCorrente.Api.Infrastructure.Security;
-using Ailos.ContaCorrente.Api.Presentation.Filters;
+// src/Ailos.ContaCorrente.Api/Program.cs
+
+using Ailos.Common.Application.Extensions;
+using Ailos.Common.Application.Middleware;
+using Ailos.Common.Configuration;
+using Ailos.Common.Infrastructure.Data;
+using Ailos.Common.Infrastructure.Security;
+using Ailos.ContaCorrente.Api.Application.Services.Implementations;
+using Ailos.ContaCorrente.Api.Application.Services.Interfaces;
+using Ailos.ContaCorrente.Api.Infrastructure.Repositories.Implementations;
+using Ailos.ContaCorrente.Api.Infrastructure.Repositories.Interfaces;
 using Ailos.EncryptedId;
 using Ailos.EncryptedId.JsonConverters;
 using DotNetEnv;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
-using System.Text;
+using Microsoft.OpenApi.Models;
+using Serilog;
+using Serilog.Events;
 
-// Carregar variáveis de ambiente do arquivo .env
-Env.Load();
+// 🔥 CONFIGURAÇÃO DE LOGS DETALHADA
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Debug()
+    .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+    .MinimumLevel.Override("System", LogEventLevel.Warning)
+    .Enrich.FromLogContext()
+    .WriteTo.Console(
+        outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"
+    )
+    .WriteTo.File(
+        "/app/logs/contacorrente-.log",
+        rollingInterval: RollingInterval.Day,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}"
+    )
+    .CreateLogger();
 
-var builder = WebApplication.CreateBuilder(args);
-
-// Configurar Configuration para usar variáveis de ambiente
-builder.Configuration.AddEnvironmentVariables();
-
-// Banco de dados SQLite
-builder.Services.AddSingleton<IDbConnectionFactory, SqliteConnectionFactory>();
-
-// Repositórios
-builder.Services.AddScoped<IContaCorrenteRepository, ContaCorrenteRepository>();
-builder.Services.AddScoped<IMovimentoRepository, MovimentoRepository>();
-builder.Services.AddScoped<IIdempotenciaRepository, IdempotenciaRepository>();
-
-// Services
-builder.Services.AddScoped<IContaCorrenteService, ContaCorrenteService>();
-builder.Services.AddScoped<IMovimentacaoService, MovimentacaoService>();
-builder.Services.AddScoped<IIdempotenciaService, IdempotenciaService>();
-
-// Encrypted ID Service - agora pega do .env
-var encryptedIdSecret = Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET")
-    ?? throw new InvalidOperationException("ENCRYPTED_ID_SECRET não configurada no .env");
-builder.Services.AddSingleton<IEncryptedIdService>(_ => 
-    Ailos.EncryptedId.EncryptedIdFactory.CreateService(encryptedIdSecret));
-
-// JWT Authentication - agora pega do .env
-var jwtSettings = new JwtSettings();
-builder.Configuration.GetSection("JwtSettings").Bind(jwtSettings);
-builder.Services.AddSingleton(jwtSettings);
-builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
-
-builder.Services.AddAuthentication(options =>
+try
 {
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-})
-.AddJwtBearer(options =>
-{
-    options.TokenValidationParameters = new TokenValidationParameters
+    Log.Information("🚀 Iniciando Ailos Conta Corrente API...");
+
+    // ================= CARREGAR .env =================
+    Env.Load();
+    Log.Information("✅ Variáveis de ambiente carregadas");
+
+    // Log das variáveis carregadas (sem mostrar valores completos por segurança)
+    Log.Debug($"ENCRYPTED_ID_SECRET: {Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET")?.Substring(0, 10)}...");
+    Log.Debug($"JWT_ISSUER: {Environment.GetEnvironmentVariable("JWT_ISSUER")}");
+
+    var builder = WebApplication.CreateBuilder(args);
+
+    // 🔥 USAR SERILOG para logging estruturado
+    builder.Host.UseSerilog();
+
+    // ================= CONFIGURAÇÕES =================
+    Log.Debug("Configurando serviços...");
+
+    // Connection string
+    var dbConnection = "Data Source=/app/data/ailos.db";
+    Log.Information($"Banco de dados: {dbConnection}");
+
+    // ================= JWT CONFIG =================
+    // NÃO use o binding do appsettings - use APENAS variáveis de ambiente
+    var jwtSettings = new JwtSettings
     {
-        ValidateIssuer = true,
-        ValidateAudience = true,
-        ValidateLifetime = true,
-        ValidateIssuerSigningKey = true,
-        ValidIssuer = jwtSettings.Issuer,
-        ValidAudience = jwtSettings.Audience,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.Secret)),
-        ClockSkew = TimeSpan.Zero
+        // Carregar APENAS de variáveis de ambiente
+        Secret = Environment.GetEnvironmentVariable("JWT_SECRET")
+            ?? throw new InvalidOperationException("JWT_SECRET não configurado"),
+
+        Issuer = Environment.GetEnvironmentVariable("JWT_ISSUER")
+            ?? "AilosBankingSystem",
+
+        Audience = Environment.GetEnvironmentVariable("JWT_AUDIENCE")
+            ?? "AilosClients",
+
+        ExpirationMinutes = int.TryParse(Environment.GetEnvironmentVariable("JWT_EXPIRATION_MINUTES"), out var minutes)
+            ? minutes : 60
     };
-});
 
-// Controllers com filtros
-builder.Services.AddControllers(options =>
-{
-    options.Filters.Add<ApiExceptionFilter>();
-})
-.AddJsonOptions(options =>
-{
-    options.JsonSerializerOptions.Converters.Add(new EncryptedIdJsonConverter());
-});
+    // Log para debug (sem mostrar a chave completa)
+    Log.Information($"✅ JWT configurado - Issuer: {jwtSettings.Issuer}, Audience: {jwtSettings.Audience}");
+    Log.Information($"✅ JWT Secret carregado (tamanho: {jwtSettings.Secret.Length} caracteres)");
 
-// Swagger
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
-{
-    c.SwaggerDoc("v1", new() { Title = "Ailos Conta Corrente API", Version = "v1" });
-    
-    // Configurar JWT no Swagger
-    c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+    // ================= CONFIGURAR JWT NO CONTAINER DI =================
+    // Usando Configure<T> para registrar as configurações como IOptions<T>
+    builder.Services.Configure<JwtSettings>(options =>
     {
-        Description = "JWT Authorization header usando o esquema Bearer.",
-        Name = "Authorization",
-        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-        Type = Microsoft.OpenApi.Models.SecuritySchemeType.ApiKey,
-        Scheme = "Bearer"
+        options.Secret = jwtSettings.Secret;
+        options.Issuer = jwtSettings.Issuer;
+        options.Audience = jwtSettings.Audience;
+        options.ExpirationMinutes = jwtSettings.ExpirationMinutes;
     });
-    
-    c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+
+    // Registrar o serviço JWT
+    builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
+
+    // ================= COMMON =================
+    builder.Services.AddAilosCommon(builder.Configuration, dbConnection);
+    Log.Debug("Serviços Common adicionados");
+
+    // ================= SERVICOS =================
+    builder.Services.AddScoped<IContaCorrenteRepository, ContaCorrenteRepository>();
+    builder.Services.AddScoped<IMovimentoRepository, MovimentoRepository>();
+    builder.Services.AddScoped<IIdempotenciaRepository, IdempotenciaRepository>();
+    builder.Services.AddScoped<IContaCorrenteService, ContaCorrenteService>();
+    builder.Services.AddScoped<IMovimentacaoService, MovimentacaoService>();
+    builder.Services.AddScoped<IIdempotenciaService, IdempotenciaService>();
+    Log.Debug("Serviços de domínio adicionados");
+
+    // ================= ENCRYPTED ID =================
+    var encryptedIdSecret = Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET");
+    if (string.IsNullOrEmpty(encryptedIdSecret))
     {
+        Log.Fatal("❌ ENCRYPTED_ID_SECRET não configurado");
+        throw new InvalidOperationException("ENCRYPTED_ID_SECRET não configurado");
+    }
+
+    builder.Services.AddSingleton<IEncryptedIdService>(_ =>
+        EncryptedIdFactory.CreateService(encryptedIdSecret)
+    );
+    Log.Debug("EncryptedId configurado");
+
+    // ================= CONTROLLERS =================
+    builder.Services.AddControllers()
+        .AddJsonOptions(options =>
         {
-            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            options.JsonSerializerOptions.Converters.Add(
+                new EncryptedIdJsonConverter()
+            );
+        });
+    Log.Debug("Controllers configurados");
+
+    // ================= SWAGGER =================
+    builder.Services.AddEndpointsApiExplorer();
+    builder.Services.AddSwaggerGen(c =>
+    {
+        c.SwaggerDoc("v1", new OpenApiInfo
+        {
+            Title = "Ailos Conta Corrente API",
+            Version = "v1"
+        });
+
+        c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+        {
+            Name = "Authorization",
+            Type = SecuritySchemeType.ApiKey,
+            Scheme = "Bearer",
+            BearerFormat = "JWT",
+            In = ParameterLocation.Header,
+            Description = "Bearer {token}"
+        });
+
+        c.AddSecurityRequirement(new OpenApiSecurityRequirement
+        {
             {
-                Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                new OpenApiSecurityScheme
                 {
-                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
-            },
-            Array.Empty<string>()
-        }
+                    Reference = new OpenApiReference
+                    {
+                        Type = ReferenceType.SecurityScheme,
+                        Id = "Bearer"
+                    }
+                },
+                Array.Empty<string>()
+            }
+        });
     });
-});
+    Log.Debug("Swagger configurado");
 
-// Cache em memória
-builder.Services.AddMemoryCache();
+    // ================= INFRA =================
+    builder.Services.AddMemoryCache();
+    builder.Services.AddHealthChecks();
+    Log.Debug("Serviços de infraestrutura adicionados");
 
-// Health Checks
-builder.Services.AddHealthChecks();
+    var app = builder.Build();
 
-var app = builder.Build();
+    // ================= MIDDLEWARE =================
+    app.UseMiddleware<ExceptionMiddleware>();
+    Log.Debug("ExceptionMiddleware configurado");
 
-// Pipeline
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-    
-    // Inicializar banco de dados em desenvolvimento
+    if (app.Environment.IsDevelopment())
+    {
+        app.UseSwagger();
+        app.UseSwaggerUI(c =>
+        {
+            c.SwaggerEndpoint("/swagger/v1/swagger.json", "Ailos Conta Corrente API v1");
+            c.RoutePrefix = string.Empty;
+        });
+        Log.Debug("Swagger UI habilitado para desenvolvimento");
+    }
+
+    app.MapHealthChecks("/health");
+
+    // ⚠️ ORDEM CORRETA
+    app.UseAuthentication();
+    app.UseAuthorization();
+    app.MapControllers();
+
+    Log.Information("✅ Middleware configurado");
+
+    // ================= INICIALIZAR BANCO =================
+    Log.Information("🔄 Inicializando banco de dados...");
     await InitializeDatabase(app.Services);
+
+    Log.Information("✅ Ailos Conta Corrente API pronta! URL: http://localhost:8080");
+
+    app.Run();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "❌ Aplicação falhou ao iniciar");
+    throw;
+}
+finally
+{
+    Log.CloseAndFlush();
 }
 
-app.UseHttpsRedirection();
-
-// Health Check endpoint
-app.MapHealthChecks("/health");
-
-app.UseAuthentication();
-app.UseAuthorization();
-app.MapControllers();
-
-app.Run();
-
+// ================= FUNÇÃO PARA INICIALIZAR BANCO =================
 static async Task InitializeDatabase(IServiceProvider services)
 {
-    using var scope = services.CreateScope();
-    var connectionFactory = scope.ServiceProvider.GetRequiredService<IDbConnectionFactory>();
-    
-    using var connection = connectionFactory.CreateConnection();
-    connection.Open();
-    
     try
     {
-        // Executar scripts SQL
-        var sqlPath = Path.Combine(Directory.GetCurrentDirectory(), "scripts/sql/contacorrente.sql");
-        
-        if (File.Exists(sqlPath))
+        using var scope = services.CreateScope();
+        var connectionFactory = scope.ServiceProvider.GetRequiredService<Ailos.Common.Infrastructure.Data.IDbConnectionFactory>();
+
+        using var connection = connectionFactory.CreateConnection();
+        connection.Open(); // CORRIGIDO: Open() em vez de OpenAsync()
+
+        Log.Information("🔗 Conexão com banco de dados aberta");
+
+        // Criar tabelas se não existirem usando o SQL embutido
+        var sql = @"
+            CREATE TABLE IF NOT EXISTS contacorrente (
+                idcontacorrente INTEGER PRIMARY KEY AUTOINCREMENT,
+                cpf TEXT NOT NULL UNIQUE,
+                numero INTEGER NOT NULL UNIQUE,
+                nome TEXT NOT NULL,
+                ativo INTEGER NOT NULL DEFAULT 1,
+                senha_hash TEXT NOT NULL,
+                data_criacao TEXT NOT NULL DEFAULT (datetime('now')),
+                data_atualizacao TEXT,
+                CHECK (ativo IN (0, 1))
+            );
+
+            CREATE TABLE IF NOT EXISTS movimento (
+                idmovimento INTEGER PRIMARY KEY AUTOINCREMENT,
+                idcontacorrente INTEGER NOT NULL,
+                datamovimento TEXT NOT NULL DEFAULT (datetime('now')),
+                tipomovimento TEXT NOT NULL,
+                valor REAL NOT NULL,
+                descricao TEXT,
+                identificacao_requisicao TEXT,
+                CHECK (tipomovimento IN ('C', 'D')),
+                FOREIGN KEY(idcontacorrente) REFERENCES contacorrente(idcontacorrente)
+            );
+
+            CREATE TABLE IF NOT EXISTS idempotencia (
+                chave_idempotencia TEXT PRIMARY KEY,
+                requisicao TEXT,
+                resultado TEXT,
+                data_criacao TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            -- Índices
+            CREATE INDEX IF NOT EXISTS idx_conta_cpf ON contacorrente(cpf);
+            CREATE INDEX IF NOT EXISTS idx_conta_numero ON contacorrente(numero);
+            CREATE INDEX IF NOT EXISTS idx_movimento_conta ON movimento(idcontacorrente);
+            CREATE INDEX IF NOT EXISTS idx_movimento_data ON movimento(datamovimento);
+            CREATE INDEX IF NOT EXISTS idx_idempotencia_chave ON idempotencia(chave_idempotencia);
+            CREATE INDEX IF NOT EXISTS idx_idempotencia_data ON idempotencia(data_criacao);
+        ";
+
+        var commands = sql.Split(';', StringSplitOptions.RemoveEmptyEntries);
+        int executed = 0;
+
+        foreach (var commandText in commands.Where(c => !string.IsNullOrWhiteSpace(c)))
         {
-            var sql = await File.ReadAllTextAsync(sqlPath);
-            
-            // Executar cada comando separadamente
-            var commands = sql.Split(';', StringSplitOptions.RemoveEmptyEntries);
-            
-            foreach (var commandText in commands)
+            var trimmedCommand = commandText.Trim();
+            if (!string.IsNullOrEmpty(trimmedCommand))
             {
-                if (!string.IsNullOrWhiteSpace(commandText))
+                try
                 {
                     using var command = connection.CreateCommand();
-                    command.CommandText = commandText.Trim();
-                    try
-                    {
-                        command.ExecuteNonQuery();
-                        Console.WriteLine($"Comando executado: {commandText.Substring(0, Math.Min(50, commandText.Length))}...");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Aviso ao executar comando SQL: {ex.Message}");
-                    }
+                    command.CommandText = trimmedCommand;
+                    command.ExecuteNonQuery(); // CORRIGIDO: ExecuteNonQuery() em vez de ExecuteNonQueryAsync()
+                    executed++;
+
+                    Log.Debug($"Executado: {trimmedCommand.Substring(0, Math.Min(50, trimmedCommand.Length))}...");
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, $"⚠️ Comando SQL ignorado: {ex.Message}");
                 }
             }
-            Console.WriteLine("Banco de dados inicializado com sucesso!");
         }
-        else
-        {
-            Console.WriteLine($"Arquivo SQL não encontrado em: {sqlPath}");
-            // Criar estrutura básica se o arquivo não existir
-            await CreateBasicTables(connection);
-        }
+
+        Log.Information($"✅ Banco inicializado: {executed} comandos executados");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"Erro ao inicializar banco de dados: {ex.Message}");
+        Log.Error(ex, "❌ ERRO ao inicializar banco");
+        throw;
     }
-}
-
-static async Task CreateBasicTables(System.Data.IDbConnection connection)
-{
-    // Criar tabelas básicas se o script SQL não existir
-    var createTablesSql = @"
-        CREATE TABLE IF NOT EXISTS contacorrente (
-            idcontacorrente INTEGER PRIMARY KEY AUTOINCREMENT,
-            cpf TEXT NOT NULL UNIQUE,
-            numero INTEGER NOT NULL UNIQUE,
-            nome TEXT NOT NULL,
-            ativo INTEGER NOT NULL DEFAULT 1,
-            senha_hash TEXT NOT NULL,
-            salt TEXT NOT NULL,
-            data_criacao TEXT NOT NULL DEFAULT (datetime('now')),
-            data_atualizacao TEXT,
-            CHECK (ativo IN (0, 1))
-        );
-
-        CREATE TABLE IF NOT EXISTS movimento (
-            idmovimento INTEGER PRIMARY KEY AUTOINCREMENT,
-            idcontacorrente INTEGER NOT NULL,
-            datamovimento TEXT NOT NULL DEFAULT (datetime('now')),
-            tipomovimento TEXT NOT NULL,
-            valor REAL NOT NULL,
-            descricao TEXT,
-            CHECK (tipomovimento IN ('C', 'D')),
-            FOREIGN KEY(idcontacorrente) REFERENCES contacorrente(idcontacorrente) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS idempotencia (
-            chave_idempotencia TEXT PRIMARY KEY,
-            requisicao TEXT,
-            resultado TEXT,
-            data_criacao TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_conta_cpf ON contacorrente(cpf);
-        CREATE INDEX IF NOT EXISTS idx_conta_numero ON contacorrente(numero);
-        CREATE INDEX IF NOT EXISTS idx_movimento_conta ON movimento(idcontacorrente);
-        CREATE INDEX IF NOT EXISTS idx_movimento_data ON movimento(datamovimento);
-        CREATE INDEX IF NOT EXISTS idx_idempotencia_chave ON idempotencia(chave_idempotencia);
-        CREATE INDEX IF NOT EXISTS idx_idempotencia_data ON idempotencia(data_criacao);
-    ";
-    
-    var commands = createTablesSql.Split(';', StringSplitOptions.RemoveEmptyEntries);
-    
-    foreach (var commandText in commands)
-    {
-        if (!string.IsNullOrWhiteSpace(commandText))
-        {
-            using var command = connection.CreateCommand();
-            command.CommandText = commandText.Trim();
-            try
-            {
-                command.ExecuteNonQuery();
-                Console.WriteLine($"Tabela criada: {commandText.Substring(0, Math.Min(50, commandText.Length))}...");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Erro ao criar tabela: {ex.Message}");
-            }
-        }
-    }
-    Console.WriteLine("Tabelas básicas criadas com sucesso!");
 }

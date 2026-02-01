@@ -1,47 +1,60 @@
 version: '3.8'
 
 services:
-  sqlite-db:
-    image: nouchka/sqlite3:latest
-    container_name: ailos-sqlite
-    volumes:
-      - ./data:/root/db
-    command: sleep infinity
-    networks:
-      - ailos-network
-
   zookeeper:
-    image: confluentinc/cp-zookeeper:latest
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: ailos-zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     networks:
       - ailos-network
+    healthcheck:
+      test: ["CMD", "echo", "ruok", "|", "nc", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   kafka:
-    image: confluentinc/cp-kafka:latest
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: ailos-kafka
+    hostname: kafka
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
       - "9092:9092"
+      - "9093:9093"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:9093
     networks:
       - ailos-network
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--list", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
+    container_name: ailos-kafka-ui
     depends_on:
       - kafka
     ports:
-      - "8080:8080"
+      - "8082:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
     networks:
       - ailos-network
 
@@ -50,58 +63,99 @@ services:
       context: .
       dockerfile: src/Ailos.ContaCorrente.Api/Dockerfile
     container_name: ailos-conta-corrente-api
+    hostname: conta-corrente-api
     ports:
-      - "5081:80"
+      - "5080:80"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      - ASPNETCORE_URLS=http://+:80
-      - ConnectionStrings__DefaultConnection=Data Source=/app/data/ailos.db
       - ENCRYPTED_ID_SECRET=${ENCRYPTED_ID_SECRET}
-      - JwtSettings__Secret=${JwtSettings__Secret}
-      - JwtSettings__Issuer=AilosContaCorrenteApi
-      - JwtSettings__Audience=AilosClient
-      - JwtSettings__ExpirationMinutes=60
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_ISSUER=${JWT_ISSUER}
+      - JWT_AUDIENCE=${JWT_AUDIENCE}
+      - JWT_EXPIRATION_MINUTES=${JWT_EXPIRATION_MINUTES}
     volumes:
       - ./data:/app/data
-      - ./scripts/sql:/app/scripts/sql
-    depends_on:
-      - sqlite-db
-      - kafka
+      - ./logs:/app/logs
     networks:
       - ailos-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   transferencia-api:
     build:
       context: .
       dockerfile: src/Ailos.Transferencia.Api/Dockerfile
     container_name: ailos-transferencia-api
+    hostname: transferencia-api
     ports:
-      - "5082:80"
+      - "5081:80"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      - ASPNETCORE_URLS=http://+:80
-      - ConnectionStrings__DefaultConnection=Data Source=/app/data/transferencia.db
       - ENCRYPTED_ID_SECRET=${ENCRYPTED_ID_SECRET}
-      - JwtSettings__Secret=${JwtSettings__Secret}
-      - JwtSettings__Issuer=AilosTransferenciaApi
-      - JwtSettings__Audience=AilosClient
-      - JwtSettings__ExpirationMinutes=60
-      - Kafka__BootstrapServers=kafka:9092
-      - Kafka__TransferenciasTopic=transferencias-realizadas
-      - Kafka__TarifasTopic=tarifas-realizadas
-      - ContaCorrenteApi__BaseUrl=http://conta-corrente-api:80
-      - TarifaConfig__ValorTarifa=2.00
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_ISSUER=${JWT_ISSUER}
+      - JWT_AUDIENCE=${JWT_AUDIENCE}
+      - JWT_EXPIRATION_MINUTES=${JWT_EXPIRATION_MINUTES}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TRANSFERENCIAS_TOPIC=transferencias-realizadas
+      - KAFKA_TARIFAS_TOPIC=tarifas-processadas
+      - CONTA_CORRENTE_API_URL=http://conta-corrente-api:80
+      - TARIFA_VALOR=2.00
     volumes:
       - ./data:/app/data
-      - ./scripts/sql:/app/scripts/sql
-    depends_on:
-      - sqlite-db
-      - conta-corrente-api
-      - kafka
+      - ./logs:/app/logs
     networks:
       - ailos-network
+    depends_on:
+      conta-corrente-api:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  tarifa-worker:
+    build:
+      context: .
+      dockerfile: src/Ailos.Tarifa.Worker/Dockerfile
+    container_name: ailos-tarifa-worker
+    hostname: tarifa-worker
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TRANSFERENCIAS_TOPIC=transferencias-realizadas
+      - KAFKA_TARIFAS_TOPIC=tarifas-processadas
+      - KAFKA_CONSUMER_GROUP=tarifa-worker-group
+      - CONTA_CORRENTE_API_URL=http://conta-corrente-api:80
+      - TARIFA_VALOR=2.00
+      - TARIFA_MAX_TENTATIVAS=3
+      - TARIFA_DELAY_MS=1000
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    networks:
+      - ailos-network
+    depends_on:
+      conta-corrente-api:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
 
 networks:
   ailos-network:
     driver: bridge
-    
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

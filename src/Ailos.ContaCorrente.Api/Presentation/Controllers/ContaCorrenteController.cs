@@ -1,8 +1,9 @@
 using Ailos.EncryptedId;
 using Ailos.ContaCorrente.Api.Application.DTOs.ContaCorrente;
-using Ailos.ContaCorrente.Api.Application.Services;
+using Ailos.ContaCorrente.Api.Application.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace Ailos.ContaCorrente.Api.Presentation.Controllers;
 
@@ -84,6 +85,10 @@ public class ContaCorrenteController : ControllerBase
             await _service.InativarAsync(contaId, request.Senha, cancellationToken);
             return NoContent();
         }
+        catch (UnauthorizedAccessException)
+        {
+            return Unauthorized();
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(new ProblemDetails
@@ -109,6 +114,10 @@ public class ContaCorrenteController : ControllerBase
             var response = await _service.ConsultarSaldoAsync(contaId, cancellationToken);
             return Ok(response);
         }
+        catch (UnauthorizedAccessException)
+        {
+            return Unauthorized();
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(new ProblemDetails
@@ -123,9 +132,12 @@ public class ContaCorrenteController : ControllerBase
 
     private long GetContaIdFromToken()
     {
-        var contaIdClaim = User.FindFirst("contaId")?.Value;
+        // PRIORIDADE: ClaimTypes.NameIdentifier (padrão .NET)
+        var contaIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst("contaId")?.Value; // Fallback para compatibilidade
+        
         if (string.IsNullOrEmpty(contaIdClaim) || !long.TryParse(contaIdClaim, out var contaId))
-            throw new UnauthorizedAccessException("Token inválido");
+            throw new UnauthorizedAccessException("Token inválido - contaId não encontrado");
 
         return contaId;
     }

@@ -257,7 +257,7 @@ CREATE TABLE contacorrente (
     nome TEXT NOT NULL,
     ativo INTEGER NOT NULL DEFAULT 1,
     senha_hash TEXT NOT NULL,
-    salt TEXT NOT NULL,
+    // salt TEXT NOT NULL,
     data_criacao TEXT NOT NULL DEFAULT (datetime('now')),
     CHECK (ativo IN (0, 1))
 );

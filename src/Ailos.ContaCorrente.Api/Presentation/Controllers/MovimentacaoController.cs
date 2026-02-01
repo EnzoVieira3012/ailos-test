@@ -1,6 +1,5 @@
-// src/Ailos.ContaCorrente.Api/Presentation/Controllers/MovimentacaoController.cs
 using Ailos.ContaCorrente.Api.Application.DTOs.Movimentacao;
-using Ailos.ContaCorrente.Api.Application.Services;
+using Ailos.ContaCorrente.Api.Application.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

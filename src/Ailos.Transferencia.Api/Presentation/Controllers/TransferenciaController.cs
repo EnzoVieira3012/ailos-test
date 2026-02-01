@@ -1,7 +1,7 @@
 using Ailos.EncryptedId;
 using Ailos.Transferencia.Api.Application.DTOs.Transferencia;
 using Ailos.Transferencia.Api.Application.Services;
-using Ailos.Transferencia.Api.Domain.Exceptions;
+using Ailos.Common.Domain.Exceptions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -47,7 +47,7 @@ public class TransferenciaController : ControllerBase
                 Title = "Falha na transferência",
                 Detail = ex.Message,
                 Status = StatusCodes.Status400BadRequest,
-                Extensions = { ["errorType"] = ex.ErrorType }
+                Extensions = { ["errorType"] = ex.ErrorCode }
             });
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("idempotente"))
