@@ -1,6 +1,6 @@
 using Ailos.Common.Configuration;
-using Ailos.Common.Domain.Exceptions;
 using Ailos.Common.Infrastructure.Data;
+using Ailos.Common.Infrastructure.Idempotencia;
 using Ailos.Common.Infrastructure.Security;
 using Ailos.Common.Infrastructure.Security.Extensions;
 using Ailos.Common.Messaging;
@@ -29,29 +29,28 @@ public static class ServiceCollectionExtensions
         // Se não configurado no appsettings, tenta do .env
         if (string.IsNullOrEmpty(jwtSettings.Secret))
         {
-            var secret = Environment.GetEnvironmentVariable("JWT_SECRET");
-            if (string.IsNullOrEmpty(secret))
-                throw new InvalidOperationException("JWT_SECRET não configurado");
-            jwtSettings.Secret = secret;
+            jwtSettings.Secret = Environment.GetEnvironmentVariable("JWT_SECRET")
+                ?? throw new InvalidOperationException("JWT_SECRET não configurado");
         }
 
         if (string.IsNullOrEmpty(jwtSettings.Issuer))
         {
-            var issuer = Environment.GetEnvironmentVariable("JWT_ISSUER");
-            jwtSettings.Issuer = issuer ?? "AilosBankingSystem";
+            jwtSettings.Issuer = Environment.GetEnvironmentVariable("JWT_ISSUER")
+                ?? "AilosBankingSystem";
         }
 
         if (string.IsNullOrEmpty(jwtSettings.Audience))
         {
-            var audience = Environment.GetEnvironmentVariable("JWT_AUDIENCE");
-            jwtSettings.Audience = audience ?? "AilosClients";
+            jwtSettings.Audience = Environment.GetEnvironmentVariable("JWT_AUDIENCE")
+                ?? "AilosClients";
         }
 
-        // Validar configuração
+        // Validar
         if (string.IsNullOrEmpty(jwtSettings.Secret))
             throw new InvalidOperationException("JWT_SECRET não configurado");
 
-        // Registrar JwtSettings como IOptions
+        // Registrar JwtSettings como singleton e IOptions
+        services.AddSingleton(jwtSettings);
         services.Configure<JwtSettings>(options =>
         {
             options.Secret = jwtSettings.Secret;
@@ -63,11 +62,11 @@ public static class ServiceCollectionExtensions
         // Configurar autenticação JWT
         services.AddJwtAuthentication(jwtSettings);
 
-        // Registrar IJwtTokenService (corrigido para usar IOptions)
+        // Registrar IJwtTokenService CORRETAMENTE
         services.AddSingleton<IJwtTokenService>(sp =>
         {
-            var options = Options.Create(jwtSettings);
-            return new JwtTokenService(options);
+            var settings = sp.GetRequiredService<JwtSettings>();
+            return new JwtTokenService(Options.Create(settings));
         });
 
         // 3. Configurar banco de dados
@@ -80,7 +79,11 @@ public static class ServiceCollectionExtensions
         // 4. Configurar password hasher
         services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
 
-        // 5. Configurar filtro global de exceções
+        // 5. Adicionar IdempotencyService e MemoryCache
+        services.AddMemoryCache(); // Se não estiver adicionado
+        services.AddSingleton<IIdempotenciaService, IdempotenciaService>();
+
+        // 6. Configurar filtro global de exceções
         services.AddControllers(options =>
         {
             options.Filters.Add<ApiExceptionFilter>();
@@ -115,13 +118,9 @@ public static class ServiceCollectionExtensions
             Env.Load();
         }
 
-        // Log das configurações carregadas (apenas para debug)
-        var encryptedIdSecret = Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET");
-        var jwtIssuer = Environment.GetEnvironmentVariable("JWT_ISSUER");
-        
+        // Log das configurações carregadas
         Console.WriteLine("=== Configurações Carregadas ===");
-        Console.WriteLine($"ENCRYPTED_ID_SECRET: {(encryptedIdSecret?.Length > 10 ? encryptedIdSecret.Substring(0, 10) + "..." : "Não configurado")}");
-        Console.WriteLine($"JWT_ISSUER: {jwtIssuer ?? "Não configurado"}");
+        Console.WriteLine($"JWT_ISSUER: {Environment.GetEnvironmentVariable("JWT_ISSUER")}");
         Console.WriteLine("===============================");
     }
 
@@ -139,6 +138,7 @@ public static class ServiceCollectionExtensions
             var bootstrapServers = Environment.GetEnvironmentVariable("KAFKA_BOOTSTRAP_SERVERS");
             var transferenciasTopic = Environment.GetEnvironmentVariable("KAFKA_TRANSFERENCIAS_TOPIC");
             var tarifasTopic = Environment.GetEnvironmentVariable("KAFKA_TARIFAS_TOPIC");
+            var consumerGroup = Environment.GetEnvironmentVariable("KAFKA_CONSUMER_GROUP");
 
             if (!string.IsNullOrEmpty(bootstrapServers))
                 settings.BootstrapServers = bootstrapServers;
@@ -148,6 +148,9 @@ public static class ServiceCollectionExtensions
 
             if (!string.IsNullOrEmpty(tarifasTopic))
                 settings.TarifasTopic = tarifasTopic;
+
+            if (!string.IsNullOrEmpty(consumerGroup))
+                settings.ConsumerGroup = consumerGroup;
         });
 
         // Infra Kafka

@@ -4,12 +4,14 @@ using Ailos.Tarifa.Worker.Infrastructure.Clients;
 using Ailos.Tarifa.Worker.Infrastructure.Kafka;
 using Ailos.Tarifa.Worker.Infrastructure.Repositories;
 using Ailos.Tarifa.Worker.Infrastructure.Repositories.Implementations;
+using Ailos.Common.Application.Extensions;
 using Ailos.Common.Infrastructure.Data;
 using DotNetEnv;
 using Serilog;
 using Serilog.Events;
 using Microsoft.AspNetCore.Http;
 using Polly;
+using Microsoft.Extensions.Configuration;
 
 // 🔥 CONFIGURAÇÃO DE LOGS DETALHADA
 Log.Logger = new LoggerConfiguration()
@@ -60,34 +62,8 @@ try
     // 1. Banco de Dados
     var dbConnection = "Data Source=/app/data/tarifas.db";
     Log.Information("💾 Banco de dados: {DatabasePath}", dbConnection);
-    builder.Services.AddSingleton<IDbConnectionFactory>(new SqliteConnectionFactory(dbConnection));
 
-    // 2. Configurações Kafka
-    Log.Information("📡 Configurando Kafka...");
-    var kafkaConfig = new KafkaConfig
-    {
-        BootstrapServers = Environment.GetEnvironmentVariable("KAFKA_BOOTSTRAP_SERVERS") ?? "kafka:9092",
-        TransferenciasTopic = Environment.GetEnvironmentVariable("KAFKA_TRANSFERENCIAS_TOPIC") ?? "transferencias-realizadas",
-        TarifasTopic = Environment.GetEnvironmentVariable("KAFKA_TARIFAS_TOPIC") ?? "tarifas-processadas",
-        ConsumerGroup = Environment.GetEnvironmentVariable("KAFKA_CONSUMER_GROUP") ?? "tarifa-worker-group"
-    };
-
-    // Configurar retry policy para Kafka
-    var retryPolicy = Policy
-        .Handle<Exception>()
-        .WaitAndRetryForeverAsync(
-            retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
-            (exception, timeSpan) =>
-            {
-                Log.Warning(exception, "❌ Falha na conexão com Kafka. Tentando novamente em {TimeSpan}", timeSpan);
-            });
-
-    builder.Services.AddSingleton(kafkaConfig);
-    builder.Services.AddSingleton<IAsyncPolicy>(retryPolicy);
-    Log.Information("✅ Kafka configurado - Servers: {Servers}, Tópico: {Topic}, Group: {Group}", 
-        kafkaConfig.BootstrapServers, kafkaConfig.TransferenciasTopic, kafkaConfig.ConsumerGroup);
-
-    // 3. Configurações de Tarifa
+    // 2. Configurações de Tarifa
     var tarifaConfig = new TarifaConfig
     {
         ValorTarifaMinima = 0.01m,
@@ -98,7 +74,42 @@ try
     Log.Information("💰 Configuração de tarifa: MaxTentativas={MaxTentativas}, Delay={Delay}ms", 
         tarifaConfig.MaxTentativas, tarifaConfig.DelayEntreTentativasMs);
 
-    // 4. HTTP Client para Conta Corrente API
+    // ================= AILOS COMMON & KAFKA =================
+    Log.Information("🔧 Adicionando serviços Ailos Common...");
+    
+    // ⚠️ ADICIONAR AILOS COMMON - Isso adiciona automaticamente:
+    // - JWT Authentication (se necessário para chamadas autenticadas)
+    // - MemoryCache (para IIdempotencyService)
+    // - IIdempotencyService (para idempotência de mensagens)
+    // - IDbConnectionFactory (configurado com dbConnection)
+    // - IPasswordHasher (se necessário)
+    // - ApiExceptionFilter (para tratamento de exceções)
+    builder.Services.AddAilosCommon(builder.Configuration, dbConnection);
+    Log.Information("✅ Ailos Common configurado");
+
+    // ================= ADICIONAR AILOS KAFKA =================
+    Log.Information("📡 Adicionando configuração Kafka...");
+    
+    // ⚠️ ADICIONAR AILOS KAFKA - Isso adiciona automaticamente:
+    // - KafkaConnectionFactory
+    // - IKafkaProducerService
+    builder.Services.AddAilosKafka(builder.Configuration);
+    Log.Information("✅ Kafka configurado via Ailos Common");
+
+    // ================= CONFIGURAR RETRY POLICY PARA KAFKA =================
+    Log.Debug("Configurando política de retry para Kafka...");
+    var retryPolicy = Policy
+        .Handle<Exception>()
+        .WaitAndRetryForeverAsync(
+            retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
+            (exception, timeSpan) =>
+            {
+                Log.Warning(exception, "❌ Falha na conexão com Kafka. Tentando novamente em {TimeSpan}", timeSpan);
+            });
+
+    builder.Services.AddSingleton<IAsyncPolicy>(retryPolicy);
+
+    // 3. HTTP Client para Conta Corrente API
     Log.Information("🔗 Configurando cliente HTTP...");
     var contaCorrenteApiUrl = Environment.GetEnvironmentVariable("CONTA_CORRENTE_API_URL") 
         ?? "http://conta-corrente-api:80";
@@ -110,17 +121,16 @@ try
         Log.Debug("HTTP Client configurado para: {BaseUrl}", contaCorrenteApiUrl);
     });
 
-    // 5. Repositórios - CORRIGIDO
-    Log.Debug("Registrando repositórios...");
+    // 4. Repositórios - CORRIGIDO
+    Log.Debug("Registrando repositórios específicos do worker...");
     builder.Services.AddScoped<ITarifaRepository, TarifaRepository>();
 
-    // 6. Serviços
-    Log.Debug("Registrando serviços...");
+    // 5. Serviços específicos do worker
+    Log.Debug("Registrando serviços específicos do worker...");
     builder.Services.AddScoped<ITarifaProcessor, TarifaProcessor>();
     builder.Services.AddScoped<IKafkaConsumerService, KafkaConsumerService>();
-    builder.Services.AddSingleton<IKafkaProducerService, KafkaProducerService>();
 
-    // 7. Worker
+    // 6. Worker
     builder.Services.AddHostedService<Worker>();
     Log.Information("👷 Worker registrado como serviço hospedado");
 
@@ -129,10 +139,34 @@ try
     
     Log.Information("🏗️ Host construído com sucesso");
 
-    // Adicione logging de requests HTTP para o worker
-    // Como é um worker, não temos HTTP pipeline, mas podemos adicionar logging para HTTP calls
-    var httpClient = host.Services.GetRequiredService<IContaCorrenteClient>();
-    Log.Debug("🔗 HTTP Client registrado para chamadas à API de conta corrente");
+    // Verificar serviços registrados (para debug)
+    var serviceProvider = host.Services;
+    using (var scope = serviceProvider.CreateScope())
+    {
+        var sp = scope.ServiceProvider;
+        
+        // Verificar se IIdempotencyService foi registrado
+        try
+        {
+            var idempotencyService = sp.GetService<Ailos.Common.Infrastructure.Idempotencia.IIdempotenciaService>();
+            Log.Information($"✅ IIdempotenciaService registrado: {idempotencyService != null}");
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "⚠️ IIdempotenciaService não encontrado ou erro ao obter");
+        }
+
+        // Verificar se IKafkaProducerService foi registrado
+        try
+        {
+            var kafkaProducerService = sp.GetService<Ailos.Common.Messaging.IKafkaProducerService>();
+            Log.Information($"✅ IKafkaProducerService registrado: {kafkaProducerService != null}");
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "⚠️ IKafkaProducerService não encontrado ou erro ao obter");
+        }
+    }
 
     // ================= INICIALIZAR BANCO DE DADOS =================
     Log.Information("🔄 Inicializando banco de dados...");
@@ -142,7 +176,7 @@ try
 
     // ================= INICIAR HOST =================
     Log.Information("🚀 AILOS TARIFA WORKER INICIADO COM SUCESSO!");
-    Log.Information("📡 Consumindo tópico: {Topic}", kafkaConfig.TransferenciasTopic);
+    Log.Information("📡 Consumindo tópico: transferencias-realizadas");
     Log.Information("👂 Aguardando mensagens Kafka...");
     Log.Information("=========================================");
 

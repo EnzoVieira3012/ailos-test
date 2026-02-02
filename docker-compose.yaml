@@ -1,4 +1,4 @@
-# Remova a linha 'version' pois é obsoleta
+# Remova a linha 'version:' no topo
 
 services:
   zookeeper:
@@ -31,6 +31,11 @@ services:
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
     networks:
       - ailos-network
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
@@ -73,7 +78,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
 
   transferencia-api:
     build:
@@ -88,16 +93,13 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
     environment:
-      # ✅ VARIÁVEIS CRÍTICAS ADICIONADAS
       - ASPNETCORE_URLS=http://0.0.0.0:80
       - ASPNETCORE_ENVIRONMENT=Development
-      - DOTNET_SYSTEM_NET_HTTP_USESOCKETSHTTPHANDLER=0
-      - DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE=false
-      - ENCRYPTED_ID_SECRET=${ENCRYPTED_ID_SECRET:-Q9f_T7WvE3R_8xZp_K6dM2a_YH_uCwB4}
-      - JWT_SECRET=${JWT_SECRET:-SuperSecretJwtKeyForAilosContaCorrenteApi2024@!}
-      - JWT_ISSUER=${JWT_ISSUER:-AilosBankingSystem}
-      - JWT_AUDIENCE=${JWT_AUDIENCE:-AilosClients}
-      - JWT_EXPIRATION_MINUTES=${JWT_EXPIRATION_MINUTES:-60}
+      - ENCRYPTED_ID_SECRET=${ENCRYPTED_ID_SECRET}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_ISSUER=${JWT_ISSUER}
+      - JWT_AUDIENCE=${JWT_AUDIENCE}
+      - JWT_EXPIRATION_MINUTES=${JWT_EXPIRATION_MINUTES}
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - KAFKA_TRANSFERENCIAS_TOPIC=transferencias-realizadas
       - KAFKA_TARIFAS_TOPIC=tarifas-processadas
@@ -105,18 +107,12 @@ services:
       - TARIFA_VALOR=2.00
     networks:
       - ailos-network
-    depends_on:
-      conta-corrente-api:
-        condition: service_healthy
-      kafka:
-        condition: service_started
-    # ✅ HEALTHCHECK REAL
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/health"]
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 90s
+      retries: 3
+      start_period: 60s
 
   tarifa-worker:
     build:
@@ -135,14 +131,15 @@ services:
       - TARIFA_VALOR=2.00
       - TARIFA_MAX_TENTATIVAS=3
       - TARIFA_DELAY_MS=1000
+      - ENCRYPTED_ID_SECRET=${ENCRYPTED_ID_SECRET}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
     networks:
       - ailos-network
     depends_on:
-      - conta-corrente-api
-      - kafka
+      kafka:
+        condition: service_healthy
 
 networks:
   ailos-network:

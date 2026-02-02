@@ -26,34 +26,48 @@ public sealed class KafkaProducerService : IKafkaProducerService, IDisposable
         T message,
         CancellationToken cancellationToken = default)
     {
-        var payload = JsonSerializer.Serialize(message);
+        try
+        {
+            var payload = JsonSerializer.Serialize(message);
 
-        var result = await _producer.ProduceAsync(
-            topic,
-            new Message<string, string>
+            var result = await _producer.ProduceAsync(
+                topic,
+                new Message<string, string>
+                {
+                    Key = key,
+                    Value = payload,
+                    Timestamp = Timestamp.Default
+                },
+                cancellationToken
+            );
+
+            if (result.Status != PersistenceStatus.Persisted)
             {
-                Key = key,
-                Value = payload,
-                Timestamp = Timestamp.Default
-            },
-            cancellationToken
-        );
+                _logger.LogWarning("Kafka não persistiu mensagem. Status: {Status}", result.Status);
+            }
 
-        if (result.Status != PersistenceStatus.Persisted)
-            throw new InvalidOperationException(
-                $"Kafka não persistiu mensagem. Status: {result.Status}");
-
-        _logger.LogInformation(
-            "📤 Kafka | Topic: {Topic} | Offset: {Offset}",
-            topic,
-            result.Offset.Value);
+            _logger.LogInformation(
+                "📤 Kafka | Topic: {Topic} | Key: {Key} | Offset: {Offset}",
+                topic, key, result.Offset.Value);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao publicar mensagem no Kafka");
+            throw;
+        }
     }
 
     public void Dispose()
     {
-        _producer.Flush(TimeSpan.FromSeconds(5));
-        _producer.Dispose();
-        _logger.LogInformation("🛑 Kafka Producer finalizado");
+        try
+        {
+            _producer.Flush(TimeSpan.FromSeconds(5));
+            _producer.Dispose();
+            _logger.LogInformation("🛑 Kafka Producer finalizado");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao finalizar Kafka Producer");
+        }
     }
 }
-
