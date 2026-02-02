@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Ailos.ContaCorrente.Api.Application.DTOs.Movimentacao;
 using Ailos.ContaCorrente.Api.Application.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -78,9 +79,13 @@ public class MovimentacaoController : ControllerBase
 
     private long GetContaIdFromToken()
     {
-        var contaIdClaim = User.FindFirst("contaId")?.Value;
+        // PRIORIDADE: ClaimTypes.NameIdentifier (padrão .NET)
+        // FALLBACK: contaId (para compatibilidade)
+        var contaIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst("contaId")?.Value;
+        
         if (string.IsNullOrEmpty(contaIdClaim) || !long.TryParse(contaIdClaim, out var contaId))
-            throw new UnauthorizedAccessException("Token inválido");
+            throw new UnauthorizedAccessException("Token inválido - contaId não encontrado");
 
         return contaId;
     }

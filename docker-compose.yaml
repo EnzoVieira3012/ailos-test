@@ -8,6 +8,12 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     networks:
       - ailos-network
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo ruok | nc localhost 2181 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   # Substitua a configuração do Kafka por esta:
   kafka:
@@ -16,49 +22,67 @@ services:
     hostname: kafka
     restart: unless-stopped
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
       - "9092:9092"
-      - "29092:29092"  # Adicione esta linha
+      - "29092:29092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      # CORREÇÃO: Adicione ambos os listeners aqui
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      # Configurações simplificadas
+      # Corrija a criação de tópicos
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_CREATE_TOPICS: "transferencias-realizadas:1:1,tarifas-processadas:1:1"
+      # Remova o KAFKA_CREATE_TOPICS - vamos criar via script
       KAFKA_LOG_RETENTION_HOURS: 24
       KAFKA_LOG_RETENTION_BYTES: -1
     networks:
       - ailos-network
     volumes:
-    - ./data/kafka:/var/lib/kafka/data
+      - ./data/kafka:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD", "bash", "-c", "nc -z localhost 9092 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
+      test: ["CMD", "bash", "-c", "kafka-topics --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    command: >
+      bash -c "
+      echo 'Aguardando Zookeeper...' &&
+      sleep 10 &&
+      echo 'Iniciando Kafka...' &&
+      /etc/confluent/docker/run &&
+      echo 'Criando tópicos...' &&
+      sleep 10 &&
+      kafka-topics --create --if-not-exists --bootstrap-server localhost:9092 \
+        --topic transferencias-realizadas --partitions 1 --replication-factor 1 \
+        --config retention.ms=86400000 &&
+      kafka-topics --create --if-not-exists --bootstrap-server localhost:9092 \
+        --topic tarifas-processadas --partitions 1 --replication-factor 1 \
+        --config retention.ms=86400000 &&
+      tail -f /dev/null
+      "
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: ailos-kafka-ui
     restart: unless-stopped
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     ports:
       - "8082:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
       KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+      DYNAMIC_CONFIG_ENABLED: "true"
     networks:
       - ailos-network
 

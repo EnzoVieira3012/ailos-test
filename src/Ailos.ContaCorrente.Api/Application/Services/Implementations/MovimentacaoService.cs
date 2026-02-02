@@ -71,15 +71,27 @@ public sealed class MovimentacaoService : IMovimentacaoService
             {
                 contaIdDestino = _encryptedIdService.Decrypt(request.ContaCorrenteId.Value);
                 
-                // Validação específica
-                if (contaIdDestino != contaIdUsuarioLogado && request.TipoMovimento != "C")
+                // 🔴 CORREÇÃO: Validação aprimorada
+                if (contaIdDestino != contaIdUsuarioLogado)
                 {
-                    throw new InvalidOperationException(
-                        "Apenas créditos podem ser feitos em contas de outros usuários");
+                    // Se está tentando movimentar em outra conta
+                    if (request.TipoMovimento == "D")
+                    {
+                        throw new InvalidOperationException(
+                            "Débitos só podem ser feitos na própria conta");
+                    }
+                    
+                    // Para créditos em outras contas, verificar se a conta existe
+                    var contaDestino = await _contaRepository.ObterPorIdAsync(contaIdDestino, cancellationToken);
+                    if (contaDestino == null)
+                        throw new ContaNaoEncontradaException();
+                        
+                    if (!contaDestino.Ativo)
+                        throw new ContaInativaException();
                 }
             }
 
-            // 4. Validar conta
+            // 4. Validar conta (apenas se for a própria conta)
             var conta = await _contaRepository.ObterPorIdAsync(contaIdDestino, cancellationToken)
                 ?? throw new ContaNaoEncontradaException();
 
