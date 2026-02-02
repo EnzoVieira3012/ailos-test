@@ -1,5 +1,3 @@
-# Atualizar .gitignore
-@"
 ## .NET
 bin/
 obj/
@@ -41,4 +39,74 @@ logs/
 TestResults/
 coverage.xml
 coverage.json
-"@ | Out-File .\.gitignore -Encoding UTF8
+
+## Ailos Banking System - Dados específicos do projeto
+data/
+!data/.gitkeep
+logs/
+!logs/.gitkeep
+
+## Configurações de desenvolvimento local
+appsettings.Development.json
+appsettings.Local.json
+
+## Arquivos de cache
+*.cache
+.cache/
+
+## Arquivos temporários
+*.tmp
+*.temp
+temp/
+
+## Arquivos de backup
+*.bak
+*.backup
+
+## Arquivos do Visual Studio Code
+.vscode/settings.json
+.vscode/tasks.json
+.vscode/launch.json
+.vscode/extensions.json
+
+## Arquivos do Rider
+*.sln.iml
+
+## Arquivos do usuário específicos do sistema operacional
+.DS_Store
+Thumbs.db
+
+## Arquivos de publicação
+publish/
+**/publish/
+
+## Arquivos do NuGet
+packages/
+**/packages/
+*.nupkg
+
+## Arquivos de compilação do Docker
+.docker/
+docker-compose.*.yml
+
+## Arquivos de migração de banco de dados (opcional - se não quiser versionar)
+**/Migrations/
+!**/Migrations/*.cs
+
+## Arquivos do Kafka (dados locais)
+**/__pycache__/
+*.pyc
+
+## Arquivos de teste de carga/performance
+loadtest/
+performance/
+
+## Arquivos de configuração de containers
+compose.yaml
+compose.yml
+docker-compose.yaml
+docker-compose.yml
+
+## Arquivos de secrets locais
+secrets.dev.yaml
+secrets.local.yaml

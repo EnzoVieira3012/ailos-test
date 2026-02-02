@@ -1,5 +1,3 @@
-# Remova a linha 'version:' no topo
-
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.0
@@ -11,6 +9,7 @@ services:
     networks:
       - ailos-network
 
+  # Substitua a configuração do Kafka por esta:
   kafka:
     image: confluentinc/cp-kafka:7.4.0
     container_name: ailos-kafka
@@ -20,22 +19,33 @@ services:
       - zookeeper
     ports:
       - "9092:9092"
+      - "29092:29092"  # Adicione esta linha
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      # CORREÇÃO: Adicione ambos os listeners aqui
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      # Configurações simplificadas
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_CREATE_TOPICS: "transferencias-realizadas:1:1,tarifas-processadas:1:1"
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_LOG_RETENTION_BYTES: -1
     networks:
       - ailos-network
+    volumes:
+    - ./data/kafka:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "9092"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD", "bash", "-c", "nc -z localhost 9092 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
@@ -100,6 +110,7 @@ services:
       - JWT_ISSUER=${JWT_ISSUER}
       - JWT_AUDIENCE=${JWT_AUDIENCE}
       - JWT_EXPIRATION_MINUTES=${JWT_EXPIRATION_MINUTES}
+      # Kafka config
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - KAFKA_TRANSFERENCIAS_TOPIC=transferencias-realizadas
       - KAFKA_TARIFAS_TOPIC=tarifas-processadas
@@ -107,6 +118,11 @@ services:
       - TARIFA_VALOR=2.00
     networks:
       - ailos-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+      conta-corrente-api:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/health"]
       interval: 30s
@@ -123,15 +139,19 @@ services:
     restart: unless-stopped
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
+      # Kafka config
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - KAFKA_TRANSFERENCIAS_TOPIC=transferencias-realizadas
       - KAFKA_TARIFAS_TOPIC=tarifas-processadas
       - KAFKA_CONSUMER_GROUP=tarifa-worker-group
+      # Conta Corrente API
       - CONTA_CORRENTE_API_URL=http://conta-corrente-api:80
+      # Config de tarifa
       - TARIFA_VALOR=2.00
       - TARIFA_MAX_TENTATIVAS=3
       - TARIFA_DELAY_MS=1000
-      - ENCRYPTED_ID_SECRET=${ENCRYPTED_ID_SECRET}
+      # JWT (não é necessário para o worker, mas mantemos para compatibilidade)
+      - JWT_ISSUER=${JWT_ISSUER}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -140,6 +160,15 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      conta-corrente-api:
+        condition: service_started
+    command: >
+      sh -c "
+      echo 'Aguardando Kafka estar completamente pronto...' &&
+      sleep 30 &&
+      echo 'Iniciando Tarifa Worker...' &&
+      dotnet Ailos.Tarifa.Worker.dll
+      "
 
 networks:
   ailos-network:

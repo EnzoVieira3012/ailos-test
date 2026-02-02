@@ -1,5 +1,44 @@
 # start.ps1 - Script para Windows PowerShell
 
+# Adicione esta função no início do script:
+function Wait-ForKafka {
+    param([int]$MaxRetries = 20)
+    
+    $retryCount = 0
+    $kafkaReady = $false
+    
+    Write-Host " Aguardando Kafka ficar pronto..." -ForegroundColor Yellow
+    
+    while ($retryCount -lt $MaxRetries -and -not $kafkaReady) {
+        try {
+            $kafkaStatus = docker-compose ps kafka --format json | ConvertFrom-Json
+            if ($kafkaStatus.Status -like "*Up*") {
+                # Testar conexão com Kafka
+                docker-compose exec -T kafka bash -c "kafka-topics --list --bootstrap-server localhost:9092" > $null 2>&1
+                if ($LASTEXITCODE -eq 0) {
+                    $kafkaReady = $true
+                    Write-Host " Kafka pronto! (tentativa $($retryCount + 1))" -ForegroundColor Green
+                }
+            }
+        } catch {
+            # Ignorar erros e continuar tentando
+        }
+        
+        if (-not $kafkaReady) {
+            $retryCount++
+            Write-Host " Aguardando Kafka... ($retryCount/$MaxRetries)" -ForegroundColor Yellow
+            Start-Sleep -Seconds 5
+        }
+    }
+    
+    if (-not $kafkaReady) {
+        Write-Host " Kafka não ficou pronto após $MaxRetries tentativas" -ForegroundColor Red
+        Write-Host " Verificando logs do Kafka..." -ForegroundColor Yellow
+        docker logs ailos-kafka --tail 50
+        exit 1
+    }
+}
+
 Write-Host " Iniciando Ailos Banking System..." -ForegroundColor Green
 
 # 1. Parar tudo
@@ -15,30 +54,45 @@ New-Item -ItemType Directory -Force -Path data, logs
 Write-Host " Reconstruindo imagens Docker..." -ForegroundColor Cyan
 docker-compose build --no-cache
 
-# 4. Iniciar Kafka
+# 4. Iniciar Kafka e Zookeeper
 Write-Host " Iniciando Kafka e Zookeeper..." -ForegroundColor Cyan
 docker-compose up -d zookeeper kafka
 
-Write-Host " Aguardando Kafka inicializar (30 segundos)..." -ForegroundColor Yellow
-Start-Sleep -Seconds 30
+# 5. Aguardar Kafka inicializar
+Wait-ForKafka -MaxRetries 30
 
-# 5. Verificar Kafka
-Write-Host " Verificando status do Kafka..." -ForegroundColor Cyan
-docker-compose ps
+# 6. Criar tópicos manualmente se necessário
+Write-Host " Criando tópicos Kafka..." -ForegroundColor Cyan
+try {
+    $topic1Cmd = "kafka-topics --create --if-not-exists --topic transferencias-realizadas --bootstrap-server localhost:9092 --partitions 1 --replication-factor 1"
+    docker-compose exec -T kafka bash -c $topic1Cmd
+        
+    $topic2Cmd = "kafka-topics --create --if-not-exists --topic tarifas-processadas --bootstrap-server localhost:9092 --partitions 1 --replication-factor 1"
+    docker-compose exec -T kafka bash -c $topic2Cmd
+        
+    Write-Host " Tópicos criados com sucesso!" -ForegroundColor Green
+} catch {
+    Write-Host " Erro ao criar tópicos: $_" -ForegroundColor Yellow
+    Write-Host " Continuando, os tópicos podem ser auto-criados..." -ForegroundColor Yellow
+}
 
-# 6. Iniciar Conta Corrente API
+# 7. Listar tópicos para verificar
+Write-Host " Listando tópicos Kafka..." -ForegroundColor Cyan
+docker-compose exec -T kafka bash -c "kafka-topics --list --bootstrap-server localhost:9092"
+
+# 8. Iniciar Conta Corrente API
 Write-Host " Iniciando Conta Corrente API..." -ForegroundColor Cyan
 docker-compose up -d conta-corrente-api
 
 Write-Host " Aguardando API inicializar (20 segundos)..." -ForegroundColor Yellow
 Start-Sleep -Seconds 20
 
-# 7. Verificar Conta Corrente
+# 9. Verificar Conta Corrente
 Write-Host " Verificando Conta Corrente API..." -ForegroundColor Cyan
 docker-compose ps
 docker logs ailos-conta-corrente-api --tail 20
 
-# 8. Testar health check
+# 10. Testar health check
 Write-Host " Testando health check da Conta Corrente..." -ForegroundColor Cyan
 try {
     $response = Invoke-WebRequest -Uri "http://localhost:5080/health" -TimeoutSec 10
@@ -49,18 +103,18 @@ try {
     exit 1
 }
 
-# 9. Iniciar Transferência API e Worker
+# 11. Iniciar Transferência API e Worker
 Write-Host " Iniciando Transferência API e Tarifa Worker..." -ForegroundColor Cyan
 docker-compose up -d transferencia-api tarifa-worker
 
 Write-Host " Aguardando serviços inicializarem (15 segundos)..." -ForegroundColor Yellow
 Start-Sleep -Seconds 15
 
-# 10. Verificar todos os serviços
+# 12. Verificar todos os serviços
 Write-Host " Status final de todos os serviços:" -ForegroundColor Green
 docker-compose ps
 
-# 11. Testar endpoints
+# 13. Testar endpoints
 Write-Host " Testando endpoints..." -ForegroundColor Cyan
 
 $services = @(

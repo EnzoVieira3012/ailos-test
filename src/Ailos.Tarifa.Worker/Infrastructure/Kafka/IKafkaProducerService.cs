@@ -1,5 +1,7 @@
 using Confluent.Kafka;
 using System.Text.Json;
+using Ailos.Common.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Ailos.Tarifa.Worker.Infrastructure.Kafka;
 
@@ -16,21 +18,21 @@ public sealed class KafkaProducerService : IKafkaProducerService, IDisposable
 {
     private readonly IProducer<string, string>? _producer;
     private readonly ILogger<KafkaProducerService> _logger;
-    private readonly KafkaConfig _config;
+    private readonly KafkaSettings _settings;
     private bool _disposed;
 
     public KafkaProducerService(
-        KafkaConfig config,
+        KafkaSettings settings,  // Alterado de KafkaConfig para KafkaSettings
         ILogger<KafkaProducerService> logger)
     {
-        _config = config;
+        _settings = settings;
         _logger = logger;
 
         try
         {
             var producerConfig = new ProducerConfig
             {
-                BootstrapServers = _config.BootstrapServers,
+                BootstrapServers = _settings.BootstrapServers,
                 Acks = Acks.All,
                 EnableIdempotence = true,
                 MessageSendMaxRetries = 3,
@@ -45,7 +47,7 @@ public sealed class KafkaProducerService : IKafkaProducerService, IDisposable
                     _logger.LogError("Erro no Kafka Producer: {Reason}", error.Reason))
                 .Build();
                 
-            _logger.LogInformation("Kafka Producer criado para servidor: {BootstrapServers}", _config.BootstrapServers);
+            _logger.LogInformation("Kafka Producer criado para servidor: {BootstrapServers}", _settings.BootstrapServers);
         }
         catch (Exception ex)
         {
