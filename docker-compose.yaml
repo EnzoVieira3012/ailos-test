@@ -52,7 +52,6 @@ services:
       context: .
       dockerfile: src/Ailos.ContaCorrente.Api/Dockerfile
     container_name: ailos-conta-corrente-api
-    hostname: conta-corrente-api
     restart: unless-stopped
     ports:
       - "5080:80"
@@ -61,19 +60,20 @@ services:
       - ./logs:/app/logs
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      - ENCRYPTED_ID_SECRET=${ENCRYPTED_ID_SECRET:-Q9f_T7WvE3R_8xZp_K6dM2a_YH_uCwB4}
-      - JWT_SECRET=${JWT_SECRET:-SuperSecretJwtKeyForAilosContaCorrenteApi2024@!}
-      - JWT_ISSUER=${JWT_ISSUER:-AilosBankingSystem}
-      - JWT_AUDIENCE=${JWT_AUDIENCE:-AilosClients}
-      - JWT_EXPIRATION_MINUTES=${JWT_EXPIRATION_MINUTES:-60}
+      - ASPNETCORE_URLS=http://0.0.0.0:80
+      - ENCRYPTED_ID_SECRET=${ENCRYPTED_ID_SECRET}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_ISSUER=${JWT_ISSUER}
+      - JWT_AUDIENCE=${JWT_AUDIENCE}
+      - JWT_EXPIRATION_MINUTES=${JWT_EXPIRATION_MINUTES}
     networks:
       - ailos-network
-    # HEALTH CHECK SIMPLIFICADO
     healthcheck:
-      test: ["CMD", "sh", "-c", "echo 'API is running' && exit 0"]
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 40s
 
   transferencia-api:
     build:
