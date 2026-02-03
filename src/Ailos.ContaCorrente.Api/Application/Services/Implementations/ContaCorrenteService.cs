@@ -46,7 +46,8 @@ public class ContaCorrenteService : IContaCorrenteService
             
             _logger.LogDebug("Salvando conta no banco...");
             var contaSalva = await _contaRepository.InserirAsync(conta, cancellationToken);
-            _logger.LogInformation("✅ Conta salva - ID: {Id}, Número: {Numero}", contaSalva.Id, contaSalva.Numero);
+            _logger.LogInformation("✅ Conta salva - ID: {Id}, Número: {Numero}, Role: {Role}", 
+                contaSalva.Id, contaSalva.Numero, contaSalva.Role);
             
             var encryptedId = _encryptedIdService.Encrypt(contaSalva.Id);
             _logger.LogDebug("ID ofuscado gerado: {EncryptedId}", encryptedId.Value);
@@ -98,8 +99,8 @@ public class ContaCorrenteService : IContaCorrenteService
             throw new UnauthorizedAccessException("Credenciais inválidas");
         }
 
-        _logger.LogDebug("Conta encontrada - ID: {Id}, Número: {Numero}, Nome: {Nome}", 
-            conta.Id, conta.Numero, conta.Nome);
+        _logger.LogDebug("Conta encontrada - ID: {Id}, Número: {Numero}, Nome: {Nome}, Role: {Role}", 
+            conta.Id, conta.Numero, conta.Nome, conta.Role);
 
         try
         {
@@ -117,16 +118,17 @@ public class ContaCorrenteService : IContaCorrenteService
                 throw new UnauthorizedAccessException("Conta inativa");
             }
 
-            var token = _jwtTokenService.GenerateToken(conta.Id, "conta-corrente");
+            // ALTERAÇÃO: usar a role da conta em vez de valor fixo "conta-corrente"
+            var token = _jwtTokenService.GenerateToken(conta.Id, conta.Role);
             var encryptedId = _encryptedIdService.Encrypt(conta.Id);
 
-            _logger.LogInformation("✅ Login bem-sucedido para conta {Id}", conta.Id);
+            _logger.LogInformation("✅ Login bem-sucedido para conta {Id} com role {Role}", conta.Id, conta.Role);
             
             return new LoginResponse
             {
                 Token = token,
                 ContaId = encryptedId,
-                NumeroConta = conta.Numero
+                NumeroConta = conta.Numero,
             };
         }
         catch (Exception ex)
@@ -168,7 +170,7 @@ public class ContaCorrenteService : IContaCorrenteService
         var saldo = await _movimentoRepository.CalcularSaldoAsync(contaId, cancellationToken);
         var encryptedId = _encryptedIdService.Encrypt(conta.Id);
 
-        _logger.LogDebug("Saldo da conta {ContaId}: {Saldo}", contaId, saldo);
+        _logger.LogDebug("Saldo da conta {ContaId} (Role: {Role}): {Saldo}", contaId, conta.Role, saldo);
         
         return new SaldoResponse
         {
@@ -178,5 +180,29 @@ public class ContaCorrenteService : IContaCorrenteService
             DataConsulta = DateTime.UtcNow,
             Saldo = saldo
         };
+    }
+
+    // MÉTODO ADICIONAL PARA ATUALIZAR ROLE (OPCIONAL)
+    public async Task AtualizarRoleAsync(long contaId, string novaRole, string senha, CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Atualizando role da conta {ContaId} para {Role}", contaId, novaRole);
+        
+        var conta = await _contaRepository.ObterPorIdAsync(contaId, cancellationToken)
+            ?? throw new InvalidOperationException("Conta não encontrada");
+
+        if (!conta.ValidarSenha(senha))
+        {
+            _logger.LogWarning("Senha inválida para atualização de role da conta {ContaId}", contaId);
+            throw new UnauthorizedAccessException("Senha inválida");
+        }
+
+        // Atualizar a role (necessário adicionar um método na entidade Conta para isso)
+        // Se não houver, pode ser necessário criar uma nova instância ou adicionar um método
+        _logger.LogInformation("Role atualizada de {RoleAntiga} para {RoleNova}", conta.Role, novaRole);
+        
+        // Atualizar no banco
+        await _contaRepository.AtualizarAsync(conta, cancellationToken);
+        
+        _logger.LogInformation("✅ Role da conta {ContaId} atualizada para {Role}", contaId, novaRole);
     }
 }

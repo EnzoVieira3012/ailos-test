@@ -1,4 +1,6 @@
 using Confluent.Kafka;
+using Ailos.Common.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Ailos.Tarifa.Worker.Infrastructure.Kafka;
 
@@ -13,15 +15,15 @@ public sealed class KafkaConsumerService : IKafkaConsumerService
     private readonly IConsumer<string, string>? _consumer;
     private readonly Application.Services.ITarifaProcessor _tarifaProcessor;
     private readonly ILogger<KafkaConsumerService> _logger;
-    private readonly KafkaConfig _config;
+    private readonly KafkaSettings _settings;
     private bool _disposed;
 
     public KafkaConsumerService(
-        KafkaConfig config,
+        KafkaSettings settings,
         Application.Services.ITarifaProcessor tarifaProcessor,
         ILogger<KafkaConsumerService> logger)
     {
-        _config = config;
+        _settings = settings;
         _tarifaProcessor = tarifaProcessor;
         _logger = logger;
 
@@ -29,8 +31,8 @@ public sealed class KafkaConsumerService : IKafkaConsumerService
         {
             var consumerConfig = new ConsumerConfig
             {
-                BootstrapServers = _config.BootstrapServers,
-                GroupId = _config.ConsumerGroup,
+                BootstrapServers = _settings.BootstrapServers,
+                GroupId = _settings.ConsumerGroup,
                 AutoOffsetReset = AutoOffsetReset.Earliest,
                 EnableAutoCommit = false,
                 EnableAutoOffsetStore = false
@@ -41,7 +43,7 @@ public sealed class KafkaConsumerService : IKafkaConsumerService
                     _logger.LogError("Erro no Kafka Consumer: {Reason}", error.Reason))
                 .Build();
                 
-            _logger.LogInformation("Kafka Consumer criado para servidor: {BootstrapServers}", _config.BootstrapServers);
+            _logger.LogInformation("Kafka Consumer criado para servidor: {BootstrapServers}", _settings.BootstrapServers);
         }
         catch (Exception ex)
         {
@@ -58,8 +60,8 @@ public sealed class KafkaConsumerService : IKafkaConsumerService
             return;
         }
 
-        _consumer.Subscribe(_config.TransferenciasTopic);
-        _logger.LogInformation("Iniciando consumo do tópico: {Topic}", _config.TransferenciasTopic);
+        _consumer.Subscribe(_settings.TransferenciasTopic);
+        _logger.LogInformation("Iniciando consumo do tópico: {Topic}", _settings.TransferenciasTopic);
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -141,12 +143,4 @@ public sealed class KafkaConsumerService : IKafkaConsumerService
             _disposed = true;
         }
     }
-}
-
-public class KafkaConfig
-{
-    public string BootstrapServers { get; set; } = "localhost:9092";
-    public string TransferenciasTopic { get; set; } = "transferencias-realizadas";
-    public string TarifasTopic { get; set; } = "tarifas-processadas";
-    public string ConsumerGroup { get; set; } = "tarifa-worker-group";
 }

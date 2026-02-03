@@ -30,7 +30,7 @@ public class KafkaConnectionFactory
             .Build();
     }
 
-    public IConsumer<string, string> CreateConsumer(string groupId = null!)
+    public IConsumer<string, string> CreateConsumer(string? groupId = null)
     {
         var config = new ConsumerConfig
         {
@@ -42,8 +42,9 @@ public class KafkaConnectionFactory
         };
 
         return new ConsumerBuilder<string, string>(config)
-            .SetErrorHandler((_, error) => 
+            .SetErrorHandler((_, error) =>
                 Console.WriteLine($"Kafka Error: {error.Reason}"))
             .Build();
     }
 }
+

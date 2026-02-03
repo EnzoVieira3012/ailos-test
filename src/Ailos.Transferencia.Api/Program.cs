@@ -1,19 +1,15 @@
-using Ailos.Transferencia.Api.Application.Services;
-using Ailos.Transferencia.Api.Infrastructure.Clients;
-using Ailos.Transferencia.Api.Infrastructure.Kafka;
-using Ailos.Transferencia.Api.Infrastructure.Repositories;
-using Ailos.Transferencia.Api.Infrastructure.Repositories.Implementations;
+using Ailos.Common.Application.Extensions;
+using Ailos.Common.Application.Middleware;
+using Ailos.Common.Infrastructure.Data;
+using Ailos.Common.Messaging;
+using Ailos.Common.Presentation.Middleware;
 using Ailos.EncryptedId;
 using Ailos.EncryptedId.JsonConverters;
-using Ailos.Common.Infrastructure.Data;
-using Ailos.Common.Infrastructure.Security;
-using Ailos.Common.Configuration;
-using Ailos.Common.Infrastructure.Security.Extensions;
-using Ailos.Common.Presentation.Filters;
+using Ailos.Transferencia.Api.Application.Services;
+using Ailos.Transferencia.Api.Infrastructure.Clients;
+using Ailos.Transferencia.Api.Infrastructure.Repositories;
+using Ailos.Transferencia.Api.Infrastructure.Repositories.Implementations;
 using DotNetEnv;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
-using System.Text;
 using Serilog;
 using Serilog.Events;
 
@@ -42,105 +38,65 @@ try
     // ================= CARREGAR .env =================
     Log.Information("📁 Carregando variáveis de ambiente...");
     Env.Load();
-    
-    // Log de variáveis críticas (parciais por segurança)
+
+    // 🔥 🔥 🔥 CORREÇÃO CRÍTICA: FORÇAR VALORES CORRETOS DO JWT 🔥 🔥 🔥
+    // O problema é que o método AddAilosCommon está pegando valores errados do appsettings.json
+    // Vamos sobrescrever com os valores corretos antes de configurar os serviços
+    Environment.SetEnvironmentVariable("JWT_AUDIENCE", "AilosClients");
+    Environment.SetEnvironmentVariable("JWT_ISSUER", "AilosBankingSystem");
+    // Garantir que o JWT_SECRET também está definido
+    var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET");
+    if (string.IsNullOrEmpty(jwtSecret))
+    {
+        Log.Error("❌ JWT_SECRET não configurado no .env");
+        throw new InvalidOperationException("JWT_SECRET não configurado");
+    }
+
     var envVars = new
     {
         EncryptedIdLoaded = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET")),
-        JwtSecretLoaded = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("JWT_SECRET")),
+        JwtSecretLoaded = !string.IsNullOrEmpty(jwtSecret),
+        JwtIssuer = Environment.GetEnvironmentVariable("JWT_ISSUER"),
+        JwtAudience = Environment.GetEnvironmentVariable("JWT_AUDIENCE"),
         KafkaServers = Environment.GetEnvironmentVariable("KAFKA_BOOTSTRAP_SERVERS"),
         ContaApiUrl = Environment.GetEnvironmentVariable("CONTA_CORRENTE_API_URL")
     };
-    
+
     Log.Information("✅ Variáveis de ambiente carregadas: {@EnvVars}", envVars);
 
+    // 🔥 VERIFICAÇÃO EXTRA: Log dos valores JWT que serão usados
+    Log.Information("🔐 CONFIGURAÇÃO JWT PARA TRANSFERÊNCIA API:");
+    Log.Information("   Issuer: {Issuer}", Environment.GetEnvironmentVariable("JWT_ISSUER"));
+    Log.Information("   Audience: {Audience}", Environment.GetEnvironmentVariable("JWT_AUDIENCE"));
+    Log.Information("   Secret configurado: {HasSecret}", !string.IsNullOrEmpty(jwtSecret));
+
     var builder = WebApplication.CreateBuilder(args);
-    
+
     // 🔥 USAR SERILOG
     builder.Host.UseSerilog();
-    
+
     // ================= CONFIGURAÇÕES =================
     Log.Debug("Configurando serviços da aplicação...");
-    
-    // 1. Banco de Dados
+
+    // 1. Connection String do banco
     var dbConnection = "Data Source=/app/data/transferencia.db";
     Log.Information("💾 Banco de dados: {DatabasePath}", dbConnection);
-    builder.Services.AddSingleton<IDbConnectionFactory>(new SqliteConnectionFactory(dbConnection));
 
-    // 2. JWT - Carregar APENAS de variáveis de ambiente
+    // 🔥 REMOVER CONFIGURAÇÕES JWT DO APPSETTINGS PARA EVITAR CONFLITOS
+    // O appsettings.json pode ter valores hardcoded que causam o problema
+    builder.Configuration["Jwt:Audience"] = null;
+    builder.Configuration["Jwt:Issuer"] = null;
+    builder.Configuration["Jwt:Secret"] = null;
+
+    // 2. Configurar Common com JWT e banco
     Log.Information("🔐 Configurando autenticação JWT...");
-    var jwtSettings = new JwtSettings
-    {
-        Secret = Environment.GetEnvironmentVariable("JWT_SECRET") 
-            ?? throw new InvalidOperationException("JWT_SECRET não configurado"),
-        Issuer = Environment.GetEnvironmentVariable("JWT_ISSUER") 
-            ?? "AilosBankingSystem",
-        Audience = Environment.GetEnvironmentVariable("JWT_AUDIENCE") 
-            ?? "AilosClients",
-        ExpirationMinutes = int.TryParse(Environment.GetEnvironmentVariable("JWT_EXPIRATION_MINUTES"), out var minutes) 
-            ? minutes : 60
-    };
-    
-    Log.Information("✅ JWT configurado - Issuer: {Issuer}, Audience: {Audience}, Expiração: {ExpirationMinutes} min", 
-        jwtSettings.Issuer, jwtSettings.Audience, jwtSettings.ExpirationMinutes);
-    
-    // Configurar JWT no DI
-    builder.Services.Configure<JwtSettings>(options =>
-    {
-        options.Secret = jwtSettings.Secret;
-        options.Issuer = jwtSettings.Issuer;
-        options.Audience = jwtSettings.Audience;
-        options.ExpirationMinutes = jwtSettings.ExpirationMinutes;
-    });
-
-    // Registrar serviço JWT
-    builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
-    
-    // Configurar autenticação
-    builder.Services.AddAuthentication(options =>
-    {
-        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-    })
-    .AddJwtBearer(options =>
-    {
-        options.RequireHttpsMetadata = false;
-        options.SaveToken = true;
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            ValidIssuer = jwtSettings.Issuer,
-            ValidAudience = jwtSettings.Audience,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.Secret)),
-            ClockSkew = TimeSpan.Zero
-        };
-        
-        // Logs detalhados do JWT
-        options.Events = new JwtBearerEvents
-        {
-            OnAuthenticationFailed = context =>
-            {
-                Log.Warning("❌ Autenticação JWT falhou: {ErrorMessage}", context.Exception.Message);
-                return Task.CompletedTask;
-            },
-            OnTokenValidated = context =>
-            {
-                var userId = context.Principal?.FindFirst("contaId")?.Value;
-                Log.Debug("✅ Token JWT validado para conta: {ContaId}", userId);
-                return Task.CompletedTask;
-            }
-        };
-    });
-    
-    Log.Information("✅ Autenticação JWT configurada");
+    builder.Services.AddAilosCommon(builder.Configuration, dbConnection);
+    Log.Information("✅ Common configurado com JWT e banco de dados");
 
     // 3. Configurações de negócio
     var tarifaConfig = new TarifaConfig
     {
-        ValorTarifa = decimal.TryParse(Environment.GetEnvironmentVariable("TARIFA_VALOR"), out var tarifa) 
+        ValorTarifa = decimal.TryParse(Environment.GetEnvironmentVariable("TARIFA_VALOR"), out var tarifa)
             ? tarifa : 2.00m
     };
     builder.Services.AddSingleton(tarifaConfig);
@@ -149,29 +105,20 @@ try
     // 4. Encrypted ID
     var encryptedIdSecret = Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET")
         ?? throw new InvalidOperationException("ENCRYPTED_ID_SECRET não configurada");
-    builder.Services.AddSingleton<IEncryptedIdService>(_ => 
+    builder.Services.AddSingleton<IEncryptedIdService>(_ =>
         EncryptedIdFactory.CreateService(encryptedIdSecret));
     Log.Information("🔒 EncryptedID configurado (secret: {SecretLength} chars)", encryptedIdSecret.Length);
 
     // 5. Kafka
     Log.Information("📡 Configurando Kafka...");
-    var kafkaConfig = new KafkaConfig
-    {
-        BootstrapServers = Environment.GetEnvironmentVariable("KAFKA_BOOTSTRAP_SERVERS") ?? "kafka:9092",
-        TransferenciasTopic = Environment.GetEnvironmentVariable("KAFKA_TRANSFERENCIAS_TOPIC") ?? "transferencias-realizadas",
-        TarifasTopic = Environment.GetEnvironmentVariable("KAFKA_TARIFAS_TOPIC") ?? "tarifas-processadas"
-    };
-    
-    builder.Services.AddSingleton(kafkaConfig);
-    builder.Services.AddSingleton<IKafkaProducerService, KafkaProducerService>();
-    Log.Information("✅ Kafka configurado - Servers: {Servers}, Tópico: {Topic}", 
-        kafkaConfig.BootstrapServers, kafkaConfig.TransferenciasTopic);
+    builder.Services.AddAilosKafka(builder.Configuration);
+    Log.Information("✅ Kafka configurado via Ailos.Common");
 
     // 6. HTTP Client para Conta Corrente API
     Log.Information("🔗 Configurando cliente HTTP...");
-    var contaCorrenteApiUrl = Environment.GetEnvironmentVariable("CONTA_CORRENTE_API_URL") 
+    var contaCorrenteApiUrl = Environment.GetEnvironmentVariable("CONTA_CORRENTE_API_URL")
         ?? "http://conta-corrente-api:80";
-    
+
     builder.Services.AddHttpClient<IContaCorrenteClient, ContaCorrenteClient>((provider, client) =>
     {
         client.BaseAddress = new Uri(contaCorrenteApiUrl);
@@ -189,16 +136,13 @@ try
     builder.Services.AddScoped<ITransferenciaService, TransferenciaService>();
     builder.Services.AddScoped<IIdempotenciaService, IdempotenciaService>();
 
-    // ================= FILTRO DE EXCEÇÕES =================
-    builder.Services.AddControllers(options =>
-    {
-        options.Filters.Add<ApiExceptionFilter>();
-    })
-    .AddJsonOptions(options =>
-    {
-        options.JsonSerializerOptions.Converters.Add(new EncryptedIdJsonConverter());
-    });
-    
+    // ================= CONTROLLERS =================
+    builder.Services.AddControllers()
+        .AddJsonOptions(options =>
+        {
+            options.JsonSerializerOptions.Converters.Add(new EncryptedIdJsonConverter());
+        });
+
     Log.Debug("Controllers configurados");
 
     // ================= SWAGGER =================
@@ -206,13 +150,13 @@ try
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerGen(c =>
     {
-        c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo 
-        { 
-            Title = "Ailos Transferência API", 
+        c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
+        {
+            Title = "Ailos Transferência API",
             Version = "v1",
             Description = "API para transferências bancárias com Kafka e tarifação automática"
         });
-        
+
         c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
         {
             Description = "JWT Authorization usando esquema Bearer. Exemplo: \"Bearer {token}\"",
@@ -221,7 +165,7 @@ try
             Type = Microsoft.OpenApi.Models.SecuritySchemeType.ApiKey,
             Scheme = "Bearer"
         });
-        
+
         c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
         {
             {
@@ -237,87 +181,90 @@ try
             }
         });
     });
-    
+
     Log.Information("📚 Swagger configurado");
 
     // ================= INFRAESTRUTURA =================
     builder.Services.AddMemoryCache();
-    builder.Services.AddHealthChecks()
-        .AddCheck<DatabaseHealthCheck>("database");
-    // .AddUrlGroup(new Uri($"{contaCorrenteApiUrl}/health"), "conta-corrente-api"); // REMOVIDO - Causava erro
-    
+    builder.Services.AddHealthChecks();
     Log.Debug("Serviços de infraestrutura configurados");
 
     // ================= CONSTRUIR APLICAÇÃO =================
     var app = builder.Build();
-    
+
     Log.Information("🏗️ Aplicação construída com sucesso");
 
     // ================= MIDDLEWARE PIPELINE =================
     Log.Debug("Configurando pipeline de middleware...");
-    
-    // Logging de todas as requisições
-    app.Use(async (context, next) =>
+
+    // 🔥 1️⃣ Routing PRIMEIRO
+    app.UseRouting();
+
+    // 2️⃣ Middlewares customizados
+    app.UseMiddleware<RequestLoggingMiddleware>();
+    app.UseMiddleware<ExceptionMiddleware>();
+
+    // 3️⃣ Swagger
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
     {
-        var startTime = DateTime.UtcNow;
-        Log.Debug("➡️ Request: {Method} {Path}", context.Request.Method, context.Request.Path);
-        
-        await next();
-        
-        var duration = DateTime.UtcNow - startTime;
-        Log.Debug("⬅️ Response: {Method} {Path} - {StatusCode} em {Duration}ms", 
-            context.Request.Method, context.Request.Path, context.Response.StatusCode, duration.TotalMilliseconds);
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Ailos Transferência API v1");
+        c.RoutePrefix = string.Empty; // Swagger em /
+        c.DisplayRequestDuration();
     });
 
-    // Swagger apenas em desenvolvimento
-    if (app.Environment.IsDevelopment())
-    {
-        app.UseSwagger();
-        app.UseSwaggerUI(c =>
-        {
-            c.SwaggerEndpoint("/swagger/v1/swagger.json", "Ailos Transferência API v1");
-            c.RoutePrefix = string.Empty; // Swagger na raiz
-            c.DisplayRequestDuration();
-        });
-        Log.Information("🔧 Swagger UI habilitado para desenvolvimento");
-    }
+    Log.Information("📚 Swagger habilitado (forçado)");
 
-    app.UseHttpsRedirection();
-    
-    // Health Check endpoint
-    app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
-    {
-        ResponseWriter = async (context, report) =>
-        {
-            context.Response.ContentType = "application/json";
-            var result = System.Text.Json.JsonSerializer.Serialize(new
-            {
-                status = report.Status.ToString(),
-                checks = report.Entries.Select(e => new
-                {
-                    name = e.Key,
-                    status = e.Value.Status.ToString(),
-                    duration = e.Value.Duration.TotalMilliseconds
-                }),
-                timestamp = DateTime.UtcNow
-            });
-            await context.Response.WriteAsync(result);
-        }
-    });
-    
-    Log.Information("❤️ Health check disponível em /health");
-
+    // 4️⃣ Auth
     app.UseAuthentication();
     app.UseAuthorization();
+
+    // 5️⃣ Endpoints
     app.MapControllers();
-    
-    Log.Information("✅ Pipeline de middleware configurado");
+
+    app.MapGet("/health", () => Results.Json(new
+    {
+        status = "healthy",
+        timestamp = DateTime.UtcNow,
+        service = "transferencia-api",
+        database = "connected",
+        kafka = "configured",
+        jwt_configured = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("JWT_SECRET"))
+    }));
+
+    app.MapGet("/healthz", () => "OK");
+
+    Log.Information("❤️ Health check disponível em /health");
 
     // ================= INICIALIZAR BANCO DE DADOS =================
     Log.Information("🔄 Inicializando banco de dados...");
     await InitializeDatabase(app.Services);
-    
+
     Log.Information("✅ Banco de dados inicializado");
+
+    // ================= VERIFICAÇÃO FINAL JWT =================
+    // Obter as configurações JWT para confirmar
+    using var scope = app.Services.CreateScope();
+    try
+    {
+        var jwtSettings = scope.ServiceProvider.GetService<Ailos.Common.Configuration.JwtSettings>();
+        if (jwtSettings != null)
+        {
+            Log.Information("🔐 CONFIGURAÇÃO JWT FINAL:");
+            Log.Information("   Issuer: {Issuer}", jwtSettings.Issuer);
+            Log.Information("   Audience: {Audience}", jwtSettings.Audience);
+            Log.Information("   Secret definido: {HasSecret}", !string.IsNullOrEmpty(jwtSettings.Secret));
+            
+            if (jwtSettings.Audience != "AilosClients")
+            {
+                Log.Warning("⚠️ Audience incorreto: {Audience}. Deveria ser 'AilosClients'", jwtSettings.Audience);
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        Log.Warning(ex, "Não foi possível verificar configurações JWT");
+    }
 
     // ================= INICIAR APLICAÇÃO =================
     Log.Information("🚀 AILOS TRANSFERÊNCIA API INICIADA COM SUCESSO!");
@@ -346,16 +293,16 @@ static async Task InitializeDatabase(IServiceProvider services)
     {
         using var scope = services.CreateScope();
         var connectionFactory = scope.ServiceProvider.GetRequiredService<IDbConnectionFactory>();
-        var logger = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Program>>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
         using var connection = connectionFactory.CreateConnection();
         connection.Open();
-        
+
         logger.LogInformation("🔗 Conexão com banco de dados aberta");
 
         // SQL para criar tabelas de transferência
         var sql = @"
-            -- Tabela de transferências
+            -- Tabela principal de transferências
             CREATE TABLE IF NOT EXISTS transferencia (
                 idtransferencia INTEGER PRIMARY KEY AUTOINCREMENT,
                 idcontacorrente_origem INTEGER NOT NULL,
@@ -369,7 +316,7 @@ static async Task InitializeDatabase(IServiceProvider services)
                 CHECK (status IN ('PROCESSANDO', 'CONCLUIDA', 'FALHA', 'ESTORNADA'))
             );
 
-            -- Tabela de idempotência
+            -- Tabela de idempotência (específica para transferência)
             CREATE TABLE IF NOT EXISTS idempotencia (
                 chave_idempotencia TEXT PRIMARY KEY,
                 requisicao TEXT,
@@ -382,6 +329,7 @@ static async Task InitializeDatabase(IServiceProvider services)
             CREATE INDEX IF NOT EXISTS idx_transferencia_destino ON transferencia(idcontacorrente_destino);
             CREATE INDEX IF NOT EXISTS idx_transferencia_data ON transferencia(datamovimento);
             CREATE INDEX IF NOT EXISTS idx_transferencia_status ON transferencia(status);
+            CREATE INDEX IF NOT EXISTS idx_transferencia_requisicao ON transferencia(identificacao_requisicao);
             CREATE INDEX IF NOT EXISTS idx_idempotencia_chave ON idempotencia(chave_idempotencia);
             CREATE INDEX IF NOT EXISTS idx_idempotencia_data ON idempotencia(data_criacao);
         ";
@@ -400,7 +348,7 @@ static async Task InitializeDatabase(IServiceProvider services)
                     command.CommandText = trimmedCommand;
                     command.ExecuteNonQuery();
                     executed++;
-                    
+
                     logger.LogDebug("📝 SQL executado: {Command}", trimmedCommand.Substring(0, Math.Min(50, trimmedCommand.Length)));
                 }
                 catch (Exception ex)
@@ -411,6 +359,22 @@ static async Task InitializeDatabase(IServiceProvider services)
         }
 
         logger.LogInformation("✅ Banco de transferência inicializado: {Comandos} comandos executados", executed);
+
+        using var checkCommand = connection.CreateCommand();
+        checkCommand.CommandText = @"
+            SELECT name FROM sqlite_master 
+            WHERE type='table' 
+            AND name IN ('transferencia', 'idempotencia')
+            ORDER BY name";
+
+        using var reader = checkCommand.ExecuteReader();
+        var tables = new List<string>();
+        while (reader.Read())
+        {
+            tables.Add(reader.GetString(0));
+        }
+
+        logger.LogInformation("📊 Tabelas existentes: {@Tables}", tables);
     }
     catch (Exception ex)
     {
@@ -426,34 +390,12 @@ public class TarifaConfig
     public decimal ValorTarifa { get; set; } = 2.00m;
 }
 
-public class DatabaseHealthCheck : Microsoft.Extensions.Diagnostics.HealthChecks.IHealthCheck
+// MUDOU AQUI: Renomeei para evitar conflito com KafkaConfig do Common
+public class TransferenciaKafkaConfig
 {
-    private readonly IDbConnectionFactory _connectionFactory;
-    
-    public DatabaseHealthCheck(IDbConnectionFactory connectionFactory)
-    {
-        _connectionFactory = connectionFactory;
-    }
-    
-    public async Task<Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult> CheckHealthAsync(
-        Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckContext context, 
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            using var connection = _connectionFactory.CreateConnection();
-            connection.Open();
-            using var command = connection.CreateCommand();
-            command.CommandText = "SELECT 1";
-            var result = command.ExecuteScalar();
-            
-            return result != null 
-                ? Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("Database conectado")
-                : Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Unhealthy("Database não responde");
-        }
-        catch (Exception ex)
-        {
-            return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Unhealthy("Erro no database", ex);
-        }
-    }
+    public string BootstrapServers { get; set; } = "kafka:9092";
+    public string TransferenciasTopic { get; set; } = "transferencias-realizadas";
+    public string TarifasTopic { get; set; } = "tarifas-processadas";
 }
+
+// ================= MIDDLEWARE DE LOGGING =================

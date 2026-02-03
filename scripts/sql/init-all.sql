@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS contacorrente (
     senha_hash TEXT NOT NULL,
     data_criacao TEXT NOT NULL DEFAULT (datetime('now')),
     data_atualizacao TEXT,
+    role TEXT DEFAULT 'conta-corrente',  -- COLUNA ROLE ADICIONADA
     CHECK (ativo IN (0, 1))
 );
 

@@ -1,21 +1,23 @@
 using Ailos.Common.Configuration;
-using Ailos.Common.Domain.Exceptions;
 using Ailos.Common.Infrastructure.Data;
+using Ailos.Common.Infrastructure.Idempotencia;
 using Ailos.Common.Infrastructure.Security;
 using Ailos.Common.Infrastructure.Security.Extensions;
+using Ailos.Common.Messaging;
 using Ailos.Common.Presentation.Filters;
 using DotNetEnv;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Ailos.Common.Application.Extensions;
 
 public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddAilosCommon(
-    this IServiceCollection services,
-    IConfiguration configuration,
-    string databaseConnectionString = null!)
+        this IServiceCollection services,
+        IConfiguration configuration,
+        string databaseConnectionString = null!)
     {
         // 1. Carregar configurações do .env
         LoadEnvironmentConfiguration();
@@ -43,7 +45,29 @@ public static class ServiceCollectionExtensions
                 ?? "AilosClients";
         }
 
+        // Validar
+        if (string.IsNullOrEmpty(jwtSettings.Secret))
+            throw new InvalidOperationException("JWT_SECRET não configurado");
+
+        // Registrar JwtSettings como singleton e IOptions
+        services.AddSingleton(jwtSettings);
+        services.Configure<JwtSettings>(options =>
+        {
+            options.Secret = jwtSettings.Secret;
+            options.Issuer = jwtSettings.Issuer;
+            options.Audience = jwtSettings.Audience;
+            options.ExpirationMinutes = jwtSettings.ExpirationMinutes;
+        });
+
+        // Configurar autenticação JWT
         services.AddJwtAuthentication(jwtSettings);
+
+        // Registrar IJwtTokenService CORRETAMENTE
+        services.AddSingleton<IJwtTokenService>(sp =>
+        {
+            var settings = sp.GetRequiredService<JwtSettings>();
+            return new JwtTokenService(Options.Create(settings));
+        });
 
         // 3. Configurar banco de dados
         if (!string.IsNullOrEmpty(databaseConnectionString))
@@ -55,7 +79,11 @@ public static class ServiceCollectionExtensions
         // 4. Configurar password hasher
         services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
 
-        // 5. Configurar filtro global de exceções
+        // 5. Adicionar IdempotencyService e MemoryCache
+        services.AddMemoryCache(); // Se não estiver adicionado
+        services.AddSingleton<IIdempotenciaService, IdempotenciaService>();
+
+        // 6. Configurar filtro global de exceções
         services.AddControllers(options =>
         {
             options.Filters.Add<ApiExceptionFilter>();
@@ -90,9 +118,8 @@ public static class ServiceCollectionExtensions
             Env.Load();
         }
 
-        // Log das configurações carregadas (apenas para debug)
+        // Log das configurações carregadas
         Console.WriteLine("=== Configurações Carregadas ===");
-        Console.WriteLine($"ENCRYPTED_ID_SECRET: {Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET")?.Substring(0, 10)}...");
         Console.WriteLine($"JWT_ISSUER: {Environment.GetEnvironmentVariable("JWT_ISSUER")}");
         Console.WriteLine("===============================");
     }
@@ -101,18 +128,34 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        var kafkaSettings = new KafkaSettings();
-        configuration.GetSection(KafkaSettings.SectionName).Bind(kafkaSettings);
+        // Bind padrão via Options
+        services.Configure<KafkaSettings>(
+            configuration.GetSection(KafkaSettings.SectionName));
 
-        // Sobrescrever com variáveis de ambiente se existirem
-        kafkaSettings.BootstrapServers = Environment.GetEnvironmentVariable("KAFKA_BOOTSTRAP_SERVERS")
-            ?? kafkaSettings.BootstrapServers;
-        kafkaSettings.TransferenciasTopic = Environment.GetEnvironmentVariable("KAFKA_TRANSFERENCIAS_TOPIC")
-            ?? kafkaSettings.TransferenciasTopic;
-        kafkaSettings.TarifasTopic = Environment.GetEnvironmentVariable("KAFKA_TARIFAS_TOPIC")
-            ?? kafkaSettings.TarifasTopic;
+        // Override via .env (se existir)
+        services.PostConfigure<KafkaSettings>(settings =>
+        {
+            var bootstrapServers = Environment.GetEnvironmentVariable("KAFKA_BOOTSTRAP_SERVERS");
+            var transferenciasTopic = Environment.GetEnvironmentVariable("KAFKA_TRANSFERENCIAS_TOPIC");
+            var tarifasTopic = Environment.GetEnvironmentVariable("KAFKA_TARIFAS_TOPIC");
+            var consumerGroup = Environment.GetEnvironmentVariable("KAFKA_CONSUMER_GROUP");
 
-        services.AddSingleton(kafkaSettings);
+            if (!string.IsNullOrEmpty(bootstrapServers))
+                settings.BootstrapServers = bootstrapServers;
+
+            if (!string.IsNullOrEmpty(transferenciasTopic))
+                settings.TransferenciasTopic = transferenciasTopic;
+
+            if (!string.IsNullOrEmpty(tarifasTopic))
+                settings.TarifasTopic = tarifasTopic;
+
+            if (!string.IsNullOrEmpty(consumerGroup))
+                settings.ConsumerGroup = consumerGroup;
+        });
+
+        // Infra Kafka
+        services.AddSingleton<KafkaConnectionFactory>();
+        services.AddSingleton<IKafkaProducerService, KafkaProducerService>();
 
         return services;
     }

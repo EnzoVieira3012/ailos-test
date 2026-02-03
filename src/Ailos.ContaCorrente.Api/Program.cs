@@ -2,9 +2,6 @@
 
 using Ailos.Common.Application.Extensions;
 using Ailos.Common.Application.Middleware;
-using Ailos.Common.Configuration;
-using Ailos.Common.Infrastructure.Data;
-using Ailos.Common.Infrastructure.Security;
 using Ailos.ContaCorrente.Api.Application.Services.Implementations;
 using Ailos.ContaCorrente.Api.Application.Services.Interfaces;
 using Ailos.ContaCorrente.Api.Infrastructure.Repositories.Implementations;
@@ -16,7 +13,6 @@ using Microsoft.OpenApi.Models;
 using Serilog;
 using Serilog.Events;
 
-// 🔥 CONFIGURAÇÃO DE LOGS DETALHADA
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
@@ -41,12 +37,11 @@ try
     Log.Information("✅ Variáveis de ambiente carregadas");
 
     // Log das variáveis carregadas (sem mostrar valores completos por segurança)
-    Log.Debug($"ENCRYPTED_ID_SECRET: {Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET")?.Substring(0, 10)}...");
+    var encryptedIdSecret = Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET");
+    Log.Debug($"ENCRYPTED_ID_SECRET configurado: {!string.IsNullOrEmpty(encryptedIdSecret)}");
     Log.Debug($"JWT_ISSUER: {Environment.GetEnvironmentVariable("JWT_ISSUER")}");
 
     var builder = WebApplication.CreateBuilder(args);
-
-    // 🔥 USAR SERILOG para logging estruturado
     builder.Host.UseSerilog();
 
     // ================= CONFIGURAÇÕES =================
@@ -56,46 +51,13 @@ try
     var dbConnection = "Data Source=/app/data/ailos.db";
     Log.Information($"Banco de dados: {dbConnection}");
 
-    // ================= JWT CONFIG =================
-    // NÃO use o binding do appsettings - use APENAS variáveis de ambiente
-    var jwtSettings = new JwtSettings
-    {
-        // Carregar APENAS de variáveis de ambiente
-        Secret = Environment.GetEnvironmentVariable("JWT_SECRET")
-            ?? throw new InvalidOperationException("JWT_SECRET não configurado"),
-
-        Issuer = Environment.GetEnvironmentVariable("JWT_ISSUER")
-            ?? "AilosBankingSystem",
-
-        Audience = Environment.GetEnvironmentVariable("JWT_AUDIENCE")
-            ?? "AilosClients",
-
-        ExpirationMinutes = int.TryParse(Environment.GetEnvironmentVariable("JWT_EXPIRATION_MINUTES"), out var minutes)
-            ? minutes : 60
-    };
-
-    // Log para debug (sem mostrar a chave completa)
-    Log.Information($"✅ JWT configurado - Issuer: {jwtSettings.Issuer}, Audience: {jwtSettings.Audience}");
-    Log.Information($"✅ JWT Secret carregado (tamanho: {jwtSettings.Secret.Length} caracteres)");
-
-    // ================= CONFIGURAR JWT NO CONTAINER DI =================
-    // Usando Configure<T> para registrar as configurações como IOptions<T>
-    builder.Services.Configure<JwtSettings>(options =>
-    {
-        options.Secret = jwtSettings.Secret;
-        options.Issuer = jwtSettings.Issuer;
-        options.Audience = jwtSettings.Audience;
-        options.ExpirationMinutes = jwtSettings.ExpirationMinutes;
-    });
-
-    // Registrar o serviço JWT
-    builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
-
-    // ================= COMMON =================
+    // ================= AILOS COMMON =================
+    // ⚠️ ESTE MÉTODO JÁ CONFIGURA AUTENTICAÇÃO JWT AUTOMATICAMENTE
+    // Não configure JWT manualmente aqui!
     builder.Services.AddAilosCommon(builder.Configuration, dbConnection);
-    Log.Debug("Serviços Common adicionados");
+    Log.Debug("Serviços Common adicionados (incluindo JWT)");
 
-    // ================= SERVICOS =================
+    // ================= SERVIÇOS DO DOMÍNIO =================
     builder.Services.AddScoped<IContaCorrenteRepository, ContaCorrenteRepository>();
     builder.Services.AddScoped<IMovimentoRepository, MovimentoRepository>();
     builder.Services.AddScoped<IIdempotenciaRepository, IdempotenciaRepository>();
@@ -105,7 +67,6 @@ try
     Log.Debug("Serviços de domínio adicionados");
 
     // ================= ENCRYPTED ID =================
-    var encryptedIdSecret = Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET");
     if (string.IsNullOrEmpty(encryptedIdSecret))
     {
         Log.Fatal("❌ ENCRYPTED_ID_SECRET não configurado");
@@ -186,13 +147,21 @@ try
         Log.Debug("Swagger UI habilitado para desenvolvimento");
     }
 
-    app.MapHealthChecks("/health");
+    // Endpoint de health check SEM autenticação
+    app.MapGet("/health", () => Results.Json(new 
+    { 
+        status = "healthy", 
+        timestamp = DateTime.UtcNow,
+        service = "conta-corrente-api"
+    }));
+    
+    app.MapGet("/healthz", () => "OK");
 
-    // ⚠️ ORDEM CORRETA
+    // ⚠️ ORDEM CRÍTICA: Authentication deve vir antes de Authorization
     app.UseAuthentication();
     app.UseAuthorization();
+    
     app.MapControllers();
-
     Log.Information("✅ Middleware configurado");
 
     // ================= INICIALIZAR BANCO =================
@@ -222,11 +191,11 @@ static async Task InitializeDatabase(IServiceProvider services)
         var connectionFactory = scope.ServiceProvider.GetRequiredService<Ailos.Common.Infrastructure.Data.IDbConnectionFactory>();
 
         using var connection = connectionFactory.CreateConnection();
-        connection.Open(); // CORRIGIDO: Open() em vez de OpenAsync()
+        connection.Open();
 
         Log.Information("🔗 Conexão com banco de dados aberta");
 
-        // Criar tabelas se não existirem usando o SQL embutido
+        // Criar tabelas se não existirem
         var sql = @"
             CREATE TABLE IF NOT EXISTS contacorrente (
                 idcontacorrente INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -237,6 +206,7 @@ static async Task InitializeDatabase(IServiceProvider services)
                 senha_hash TEXT NOT NULL,
                 data_criacao TEXT NOT NULL DEFAULT (datetime('now')),
                 data_atualizacao TEXT,
+                role TEXT DEFAULT 'conta-corrente',
                 CHECK (ativo IN (0, 1))
             );
 
@@ -280,7 +250,7 @@ static async Task InitializeDatabase(IServiceProvider services)
                 {
                     using var command = connection.CreateCommand();
                     command.CommandText = trimmedCommand;
-                    command.ExecuteNonQuery(); // CORRIGIDO: ExecuteNonQuery() em vez de ExecuteNonQueryAsync()
+                    command.ExecuteNonQuery();
                     executed++;
 
                     Log.Debug($"Executado: {trimmedCommand.Substring(0, Math.Min(50, trimmedCommand.Length))}...");

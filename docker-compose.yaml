@@ -1,60 +1,88 @@
-version: '3.8'
-
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.0
     container_name: ailos-zookeeper
+    restart: unless-stopped
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     networks:
       - ailos-network
     healthcheck:
-      test: ["CMD", "echo", "ruok", "|", "nc", "localhost", "2181"]
+      test: ["CMD", "bash", "-c", "echo ruok | nc localhost 2181 || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 20s
+      retries: 10
+      start_period: 30s
 
+  # Substitua a configuração do Kafka por esta:
   kafka:
     image: confluentinc/cp-kafka:7.4.0
     container_name: ailos-kafka
     hostname: kafka
+    restart: unless-stopped
     depends_on:
       zookeeper:
         condition: service_healthy
     ports:
       - "9092:9092"
-      - "9093:9093"
+      - "29092:29092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:9093
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      # Corrija a criação de tópicos
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # Remova o KAFKA_CREATE_TOPICS - vamos criar via script
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_LOG_RETENTION_BYTES: -1
     networks:
       - ailos-network
+    volumes:
+      - ./data/kafka:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD", "kafka-topics", "--list", "--bootstrap-server", "localhost:9092"]
-      interval: 10s
+      test: ["CMD", "bash", "-c", "kafka-topics --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 30s
       timeout: 10s
-      retries: 10
-      start_period: 40s
+      retries: 5
+      start_period: 90s
+    command: >
+      bash -c "
+      echo 'Aguardando Zookeeper...' &&
+      sleep 10 &&
+      echo 'Iniciando Kafka...' &&
+      /etc/confluent/docker/run &&
+      echo 'Criando tópicos...' &&
+      sleep 10 &&
+      kafka-topics --create --if-not-exists --bootstrap-server localhost:9092 \
+        --topic transferencias-realizadas --partitions 1 --replication-factor 1 \
+        --config retention.ms=86400000 &&
+      kafka-topics --create --if-not-exists --bootstrap-server localhost:9092 \
+        --topic tarifas-processadas --partitions 1 --replication-factor 1 \
+        --config retention.ms=86400000 &&
+      tail -f /dev/null
+      "
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: ailos-kafka-ui
+    restart: unless-stopped
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     ports:
       - "8082:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
       KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+      DYNAMIC_CONFIG_ENABLED: "true"
     networks:
       - ailos-network
 
@@ -63,30 +91,28 @@ services:
       context: .
       dockerfile: src/Ailos.ContaCorrente.Api/Dockerfile
     container_name: ailos-conta-corrente-api
-    hostname: conta-corrente-api
+    restart: unless-stopped
     ports:
       - "5080:80"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://0.0.0.0:80
       - ENCRYPTED_ID_SECRET=${ENCRYPTED_ID_SECRET}
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ISSUER=${JWT_ISSUER}
       - JWT_AUDIENCE=${JWT_AUDIENCE}
       - JWT_EXPIRATION_MINUTES=${JWT_EXPIRATION_MINUTES}
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
     networks:
       - ailos-network
-    depends_on:
-      kafka:
-        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
 
   transferencia-api:
     build:
@@ -94,32 +120,35 @@ services:
       dockerfile: src/Ailos.Transferencia.Api/Dockerfile
     container_name: ailos-transferencia-api
     hostname: transferencia-api
+    restart: unless-stopped
     ports:
       - "5081:80"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
     environment:
+      - ASPNETCORE_URLS=http://0.0.0.0:80
       - ASPNETCORE_ENVIRONMENT=Development
       - ENCRYPTED_ID_SECRET=${ENCRYPTED_ID_SECRET}
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ISSUER=${JWT_ISSUER}
       - JWT_AUDIENCE=${JWT_AUDIENCE}
       - JWT_EXPIRATION_MINUTES=${JWT_EXPIRATION_MINUTES}
+      # Kafka config
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - KAFKA_TRANSFERENCIAS_TOPIC=transferencias-realizadas
       - KAFKA_TARIFAS_TOPIC=tarifas-processadas
       - CONTA_CORRENTE_API_URL=http://conta-corrente-api:80
       - TARIFA_VALOR=2.00
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
     networks:
       - ailos-network
     depends_on:
-      conta-corrente-api:
-        condition: service_healthy
       kafka:
         condition: service_healthy
+      conta-corrente-api:
+        condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -131,31 +160,40 @@ services:
       dockerfile: src/Ailos.Tarifa.Worker/Dockerfile
     container_name: ailos-tarifa-worker
     hostname: tarifa-worker
+    restart: unless-stopped
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
+      # Kafka config
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - KAFKA_TRANSFERENCIAS_TOPIC=transferencias-realizadas
       - KAFKA_TARIFAS_TOPIC=tarifas-processadas
       - KAFKA_CONSUMER_GROUP=tarifa-worker-group
+      # Conta Corrente API
       - CONTA_CORRENTE_API_URL=http://conta-corrente-api:80
+      # Config de tarifa
       - TARIFA_VALOR=2.00
       - TARIFA_MAX_TENTATIVAS=3
       - TARIFA_DELAY_MS=1000
+      # JWT (não é necessário para o worker, mas mantemos para compatibilidade)
+      - JWT_ISSUER=${JWT_ISSUER}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
     networks:
       - ailos-network
     depends_on:
-      conta-corrente-api:
-        condition: service_healthy
       kafka:
         condition: service_healthy
-    restart: unless-stopped
+      conta-corrente-api:
+        condition: service_started
+    command: >
+      sh -c "
+      echo 'Aguardando Kafka estar completamente pronto...' &&
+      sleep 30 &&
+      echo 'Iniciando Tarifa Worker...' &&
+      dotnet Ailos.Tarifa.Worker.dll
+      "
 
 networks:
   ailos-network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
