@@ -1,0 +1,6 @@
+@Ailos.EncryptedId.TestApi_HostAddress = http://localhost:5196
+
+GET {{Ailos.EncryptedId.TestApi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
