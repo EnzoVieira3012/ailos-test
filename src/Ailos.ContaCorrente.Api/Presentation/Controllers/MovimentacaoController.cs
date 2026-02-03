@@ -1,5 +1,6 @@
 using System.Security.Claims;
-using Ailos.ContaCorrente.Api.Application.DTOs.Movimentacao;
+using Ailos.ContaCorrente.Api.Application.DTOs.Movimentacao.Request;
+using Ailos.ContaCorrente.Api.Application.DTOs.Movimentacao.Response;
 using Ailos.ContaCorrente.Api.Application.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -79,8 +80,6 @@ public class MovimentacaoController : ControllerBase
 
     private long GetContaIdFromToken()
     {
-        // PRIORIDADE: ClaimTypes.NameIdentifier (padrão .NET)
-        // FALLBACK: contaId (para compatibilidade)
         var contaIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
             ?? User.FindFirst("contaId")?.Value;
         

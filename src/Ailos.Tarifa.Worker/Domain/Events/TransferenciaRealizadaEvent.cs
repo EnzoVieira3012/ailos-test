@@ -4,7 +4,6 @@ namespace Ailos.Tarifa.Worker.Domain.Events;
 
 public class TransferenciaRealizadaEvent
 {
-    // 🔥 CORREÇÃO: Usar maiúsculas porque o JSON da Transferência API está assim
     [JsonPropertyName("TransferenciaId")]
     public long TransferenciaId { get; set; }
     
@@ -23,7 +22,6 @@ public class TransferenciaRealizadaEvent
     [JsonPropertyName("DataMovimento")]
     public DateTime DataMovimento { get; set; }
     
-    // 🔥 ADICIONAR se a Transferência API envia (provavelmente não, mas deixamos opcional)
     [JsonPropertyName("IdentificacaoRequisicao")]
     public string? IdentificacaoRequisicao { get; set; }
 }

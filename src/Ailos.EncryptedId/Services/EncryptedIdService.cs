@@ -56,21 +56,16 @@ public sealed class EncryptedIdService : IEncryptedIdService
         }
     }
 
-    // ------------------ Métodos Privados ------------------
-
     private byte[] BuildPayload(long id)
     {
         var buffer = new byte[32];
 
-        // 1️⃣ ID (8 bytes)
         BitConverter.GetBytes(id).CopyTo(buffer, 0);
 
-        // 2️⃣ nonce determinístico (8 bytes)
         using var hmac = new HMACSHA256(_key);
         var nonce = hmac.ComputeHash(BitConverter.GetBytes(id));
         Array.Copy(nonce, 0, buffer, 8, 8);
 
-        // 3️⃣ assinatura (16 bytes)
         var signature = hmac.ComputeHash(buffer[..16]);
         Array.Copy(signature, 0, buffer, 16, 16);
 
@@ -81,13 +76,10 @@ public sealed class EncryptedIdService : IEncryptedIdService
     {
         id = BitConverter.ToInt64(payload, 0);
         
-        // Verificar assinatura
         using var hmac = new HMACSHA256(_key);
         
-        // Recalcular assinatura dos primeiros 16 bytes
         var expectedSignature = hmac.ComputeHash(payload[..16]);
         
-        // Comparar com os últimos 16 bytes
         for (int i = 0; i < 16; i++)
         {
             if (payload[16 + i] != expectedSignature[i])

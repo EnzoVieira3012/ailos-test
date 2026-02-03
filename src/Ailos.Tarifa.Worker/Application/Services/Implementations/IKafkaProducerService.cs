@@ -1,18 +1,8 @@
 using Confluent.Kafka;
 using System.Text.Json;
 using Ailos.Common.Configuration;
-using Microsoft.Extensions.Logging;
 
-namespace Ailos.Tarifa.Worker.Infrastructure.Kafka;
-
-public interface IKafkaProducerService
-{
-    Task ProduzirMensagemAsync<T>(
-        string topic,
-        string key,
-        T message,
-        CancellationToken cancellationToken = default);
-}
+namespace Ailos.Tarifa.Worker.Application.Services.Implementations;
 
 public sealed class KafkaProducerService : IKafkaProducerService, IDisposable
 {
@@ -22,7 +12,7 @@ public sealed class KafkaProducerService : IKafkaProducerService, IDisposable
     private bool _disposed;
 
     public KafkaProducerService(
-        KafkaSettings settings,  // Alterado de KafkaConfig para KafkaSettings
+        KafkaSettings settings,
         ILogger<KafkaProducerService> logger)
     {
         _settings = settings;

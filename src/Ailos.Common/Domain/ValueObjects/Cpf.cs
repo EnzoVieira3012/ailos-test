@@ -25,7 +25,6 @@ public sealed record Cpf
         if (cpf.All(c => c == cpf[0]))
             return false;
 
-        // Validação dos dígitos verificadores
         int[] multiplicador1 = { 10, 9, 8, 7, 6, 5, 4, 3, 2 };
         int[] multiplicador2 = { 11, 10, 9, 8, 7, 6, 5, 4, 3, 2 };
 

@@ -1,11 +1,11 @@
-using Ailos.ContaCorrente.Api.Application.DTOs.ContaCorrente;
+using Ailos.ContaCorrente.Api.Application.DTOs.ContaCorrente.Request;
+using Ailos.ContaCorrente.Api.Application.DTOs.ContaCorrente.Response;
 using Ailos.ContaCorrente.Api.Domain.Entities;
 using Ailos.ContaCorrente.Api.Infrastructure.Repositories.Interfaces;
 using Ailos.ContaCorrente.Api.Application.Services.Interfaces;
 using Ailos.Common.Domain.ValueObjects;
 using Ailos.EncryptedId;
 using Ailos.Common.Infrastructure.Security;
-using Microsoft.Extensions.Logging;
 
 namespace Ailos.ContaCorrente.Api.Application.Services.Implementations;
 
@@ -33,7 +33,7 @@ public class ContaCorrenteService : IContaCorrenteService
 
     public async Task<CadastrarContaResponse> CadastrarAsync(CadastrarContaRequest request, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("📝 Iniciando cadastro para CPF: {Cpf}", request.Cpf);
+        _logger.LogInformation("Iniciando cadastro para CPF: {Cpf}", request.Cpf);
         
         try
         {
@@ -46,7 +46,7 @@ public class ContaCorrenteService : IContaCorrenteService
             
             _logger.LogDebug("Salvando conta no banco...");
             var contaSalva = await _contaRepository.InserirAsync(conta, cancellationToken);
-            _logger.LogInformation("✅ Conta salva - ID: {Id}, Número: {Numero}, Role: {Role}", 
+            _logger.LogInformation("Conta salva - ID: {Id}, Número: {Numero}, Role: {Role}", 
                 contaSalva.Id, contaSalva.Numero, contaSalva.Role);
             
             var encryptedId = _encryptedIdService.Encrypt(contaSalva.Id);
@@ -70,14 +70,14 @@ public class ContaCorrenteService : IContaCorrenteService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ ERRO inesperado no cadastro - CPF: {Cpf}, Mensagem: {Message}", request.Cpf, ex.Message);
+            _logger.LogError(ex, "ERRO inesperado no cadastro - CPF: {Cpf}, Mensagem: {Message}", request.Cpf, ex.Message);
             throw new InvalidOperationException($"Erro ao cadastrar conta: {ex.Message}", ex);
         }
     }
 
     public async Task<LoginResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("🔐 Tentativa de login - CPF: {Cpf}, Número: {Numero}", 
+        _logger.LogInformation("Tentativa de login - CPF: {Cpf}, Número: {Numero}", 
             request.Cpf ?? "N/A", request.NumeroConta?.ToString() ?? "N/A");
 
         Conta? conta = null;
@@ -118,11 +118,10 @@ public class ContaCorrenteService : IContaCorrenteService
                 throw new UnauthorizedAccessException("Conta inativa");
             }
 
-            // ALTERAÇÃO: usar a role da conta em vez de valor fixo "conta-corrente"
             var token = _jwtTokenService.GenerateToken(conta.Id, conta.Role);
             var encryptedId = _encryptedIdService.Encrypt(conta.Id);
 
-            _logger.LogInformation("✅ Login bem-sucedido para conta {Id} com role {Role}", conta.Id, conta.Role);
+            _logger.LogInformation("Login bem-sucedido para conta {Id} com role {Role}", conta.Id, conta.Role);
             
             return new LoginResponse
             {
@@ -154,7 +153,7 @@ public class ContaCorrenteService : IContaCorrenteService
         conta.Inativar();
         await _contaRepository.AtualizarAsync(conta, cancellationToken);
         
-        _logger.LogInformation("✅ Conta {ContaId} inativada", contaId);
+        _logger.LogInformation("Conta {ContaId} inativada", contaId);
     }
 
     public async Task<SaldoResponse> ConsultarSaldoAsync(long contaId, CancellationToken cancellationToken)
@@ -182,7 +181,6 @@ public class ContaCorrenteService : IContaCorrenteService
         };
     }
 
-    // MÉTODO ADICIONAL PARA ATUALIZAR ROLE (OPCIONAL)
     public async Task AtualizarRoleAsync(long contaId, string novaRole, string senha, CancellationToken cancellationToken)
     {
         _logger.LogInformation("Atualizando role da conta {ContaId} para {Role}", contaId, novaRole);
@@ -196,13 +194,10 @@ public class ContaCorrenteService : IContaCorrenteService
             throw new UnauthorizedAccessException("Senha inválida");
         }
 
-        // Atualizar a role (necessário adicionar um método na entidade Conta para isso)
-        // Se não houver, pode ser necessário criar uma nova instância ou adicionar um método
         _logger.LogInformation("Role atualizada de {RoleAntiga} para {RoleNova}", conta.Role, novaRole);
         
-        // Atualizar no banco
         await _contaRepository.AtualizarAsync(conta, cancellationToken);
         
-        _logger.LogInformation("✅ Role da conta {ContaId} atualizada para {Role}", contaId, novaRole);
+        _logger.LogInformation("Role da conta {ContaId} atualizada para {Role}", contaId, novaRole);
     }
 }

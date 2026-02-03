@@ -1,6 +1,5 @@
 using Dapper;
 using Ailos.Transferencia.Api.Domain.Entities;
-using Ailos.Transferencia.Api.Infrastructure.Repositories;
 using Ailos.Common.Infrastructure.Data;
 
 namespace Ailos.Transferencia.Api.Infrastructure.Repositories.Implementations;
@@ -55,7 +54,6 @@ public sealed class IdempotenciaRepository : IIdempotenciaRepository
             new CommandDefinition(sql, dbModel, cancellationToken: cancellationToken));
     }
 
-    // Modelo para mapeamento do banco
     private class IdempotenciaDbModel
     {
         public string Chave { get; set; } = string.Empty;

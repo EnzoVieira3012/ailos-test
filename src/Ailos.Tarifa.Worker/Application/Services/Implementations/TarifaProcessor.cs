@@ -1,14 +1,12 @@
 using System.Text.Json;
 using Ailos.Tarifa.Worker.Domain.Events;
 using Ailos.Tarifa.Worker.Domain.Entities;
-using Ailos.Tarifa.Worker.Infrastructure.Clients;
-using Ailos.Tarifa.Worker.Infrastructure.Kafka;
+using Ailos.Tarifa.Worker.Infrastructure.Clients.Interfaces;
 using Ailos.Tarifa.Worker.Infrastructure.Repositories;
 using Microsoft.Extensions.Options;
 using Polly;
-using Microsoft.Extensions.Logging;
 
-namespace Ailos.Tarifa.Worker.Application.Services;
+namespace Ailos.Tarifa.Worker.Application.Services.Implementations;
 
 public sealed class TarifaProcessor : ITarifaProcessor
 {
@@ -32,7 +30,6 @@ public sealed class TarifaProcessor : ITarifaProcessor
         _logger = logger;
         _config = config.Value;
 
-        // Configurar política de retry com exponential backoff
         _retryPolicy = Policy
             .Handle<Exception>()
             .WaitAndRetryAsync(
@@ -56,16 +53,14 @@ public sealed class TarifaProcessor : ITarifaProcessor
     {
         try
         {
-            _logger.LogInformation("📥 Mensagem Kafka recebida: {Json}", mensagemJson);
+            _logger.LogInformation("Mensagem Kafka recebida: {Json}", mensagemJson);
 
-            // 🔥 CORREÇÃO CRÍTICA: Configurar desserialização correta
             var options = new JsonSerializerOptions
             {
-                PropertyNameCaseInsensitive = true, // Importante para aceitar maiúsculas/minúsculas
+                PropertyNameCaseInsensitive = true,
                 NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString
             };
 
-            // 1. Desserializar evento
             var evento = JsonSerializer.Deserialize<TransferenciaRealizadaEvent>(mensagemJson, options);
             if (evento == null)
             {
@@ -73,26 +68,23 @@ public sealed class TarifaProcessor : ITarifaProcessor
                 return false;
             }
 
-            _logger.LogInformation("✅ Dados parseados: ID={Id}, Valor={Valor}, Origem={Origem}",
+            _logger.LogInformation("Dados parseados: ID={Id}, Valor={Valor}, Origem={Origem}",
                 evento.TransferenciaId, evento.Valor, evento.ContaOrigemId);
 
-            // 2. Verificar duplicidade
             var jaProcessada = await _tarifaRepository.TransferenciaJaProcessadaAsync(
                 evento.TransferenciaId, topico, offset, cancellationToken);
 
             if (jaProcessada)
             {
                 _logger.LogInformation("Transferência já processada: {TransferenciaId}", evento.TransferenciaId);
-                return true; // Considera como sucesso para não reprocessar
+                return true;
             }
 
-            // 3. 🔥 CALCULAR TARIFA (agora é responsabilidade do worker)
             decimal valorTarifa = CalcularTarifa(evento.Valor);
 
             _logger.LogInformation("💰 Calculando tarifa: R$ {Tarifa} para transferência {Id} de R$ {Valor}",
                 valorTarifa, evento.TransferenciaId, evento.Valor);
 
-            // 4. Aplicar tarifa com retry
             var tarifaAplicada = await _retryPolicy.ExecuteAsync(async () =>
             {
                 return await _contaCorrenteClient.AplicarTarifaAsync(
@@ -104,7 +96,6 @@ public sealed class TarifaProcessor : ITarifaProcessor
 
             if (tarifaAplicada)
             {
-                // 5. Registrar tarifa no banco
                 var tarifa = new TarifaEntity
                 {
                     ContaCorrenteId = evento.ContaOrigemId,
@@ -117,44 +108,40 @@ public sealed class TarifaProcessor : ITarifaProcessor
 
                 await _tarifaRepository.InserirTarifaAsync(tarifa, cancellationToken);
 
-                // 6. Registrar histórico de processamento com sucesso
                 await RegistrarProcessamentoComSucesso(
                     evento, valorTarifa, topico, offset, "SUCESSO", cancellationToken);
 
-                // 7. Publicar no tópico de tarifas processadas
                 await PublicarTarifaProcessada(evento, valorTarifa, cancellationToken);
 
-                _logger.LogInformation("✅ Tarifa processada com sucesso: Transferencia={TransferenciaId}, Valor={Valor}",
+                _logger.LogInformation("Tarifa processada com sucesso: Transferencia={TransferenciaId}, Valor={Valor}",
                     evento.TransferenciaId, valorTarifa);
 
                 return true;
             }
             else
             {
-                // 8. Registrar falha
                 await RegistrarProcessamentoComFalha(
                     evento, valorTarifa, topico, offset, "FALHA_APLICACAO_TARIFA", cancellationToken);
 
-                _logger.LogError("❌ Falha ao aplicar tarifa: Transferencia={TransferenciaId}", evento.TransferenciaId);
+                _logger.LogError("Falha ao aplicar tarifa: Transferencia={TransferenciaId}", evento.TransferenciaId);
 
-                return false; // Não commit no offset para reprocessar
+                return false;
             }
         }
         catch (JsonException ex)
         {
-            _logger.LogError(ex, "❌ Erro de JSON na mensagem: {Mensagem}", mensagemJson);
+            _logger.LogError(ex, "Erro de JSON na mensagem: {Mensagem}", mensagemJson);
             return false;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro inesperado no processamento da mensagem");
+            _logger.LogError(ex, "Erro inesperado no processamento da mensagem");
             return false;
         }
     }
 
     private decimal CalcularTarifa(decimal valorTransferencia)
     {
-        // 🔥 Retorna o valor fixo configurado (R$ 2,00)
         return _config.ValorTarifaMinima;
     }
 
@@ -180,7 +167,7 @@ public sealed class TarifaProcessor : ITarifaProcessor
 
         await _tarifaRepository.RegistrarProcessamentoAsync(historico, cancellationToken);
         
-        _logger.LogDebug("📝 Histórico registrado: Transferencia={Id}, Status={Status}", 
+        _logger.LogDebug("Histórico registrado: Transferencia={Id}, Status={Status}", 
             evento.TransferenciaId, status);
     }
 
@@ -206,7 +193,7 @@ public sealed class TarifaProcessor : ITarifaProcessor
 
         await _tarifaRepository.RegistrarProcessamentoAsync(historico, cancellationToken);
         
-        _logger.LogDebug("📝 Histórico de falha registrado: Transferencia={Id}", evento.TransferenciaId);
+        _logger.LogDebug("Histórico de falha registrado: Transferencia={Id}", evento.TransferenciaId);
     }
 
     private async Task PublicarTarifaProcessada(
@@ -234,13 +221,12 @@ public sealed class TarifaProcessor : ITarifaProcessor
                 mensagem,
                 cancellationToken);
 
-            _logger.LogDebug("📤 Tarifa publicada no tópico 'tarifas-processadas': {TransferenciaId}",
+            _logger.LogDebug("Tarifa publicada no tópico 'tarifas-processadas': {TransferenciaId}",
                 evento.TransferenciaId);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "⚠️ Erro ao publicar tarifa processada no Kafka");
-            // Não falha o processamento principal
+            _logger.LogError(ex, "Erro ao publicar tarifa processada no Kafka");
         }
     }
 }

@@ -60,7 +60,6 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
         var id = await connection.ExecuteScalarAsync<long>(
             new CommandDefinition(sql, dbModel, cancellationToken: cancellationToken));
 
-        // Centraliza a conversão banco -> domínio (SEM Enum.Parse duplicado)
         dbModel.Id = id;
         return dbModel.ToEntity();
     }
@@ -113,9 +112,6 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
         return results.Select(r => r.ToEntity());
     }
 
-    // =========================
-    // DB MODEL (mapeamento)
-    // =========================
     private sealed class TransferenciaDbModel
     {
         public long Id { get; set; }

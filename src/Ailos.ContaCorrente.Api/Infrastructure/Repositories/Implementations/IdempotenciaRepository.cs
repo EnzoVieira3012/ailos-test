@@ -55,7 +55,6 @@ public sealed class IdempotenciaRepository : IIdempotenciaRepository
             new CommandDefinition(sql, dbModel, cancellationToken: cancellationToken));
     }
 
-    // Modelo para mapeamento do banco
     private class IdempotenciaDbModel
     {
         public string Chave { get; set; } = string.Empty;

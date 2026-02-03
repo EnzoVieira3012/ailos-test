@@ -63,13 +63,10 @@ public class IdempotenciaController : ControllerBase
         [FromRoute] string chave,
         CancellationToken cancellationToken = default)
     {
-        // Note: Em um cenário real, o delete seria no repositório
-        // Mas como é endpoint administrativo, pode ficar assim por enquanto
         return NoContent();
     }
 }
 
-// DTOs para o controller
 public sealed record IdempotenciaResponse
 {
     public required string Chave { get; init; }

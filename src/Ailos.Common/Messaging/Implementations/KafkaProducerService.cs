@@ -3,7 +3,7 @@ using Confluent.Kafka;
 using Microsoft.Extensions.Logging;
 using Ailos.Common.Configuration;
 
-namespace Ailos.Common.Messaging;
+namespace Ailos.Common.Messaging.Implementations;
 
 public sealed class KafkaProducerService : IKafkaProducerService, IDisposable
 {
@@ -17,7 +17,7 @@ public sealed class KafkaProducerService : IKafkaProducerService, IDisposable
         _producer = factory.CreateProducer();
         _logger = logger;
 
-        _logger.LogInformation("✅ Kafka Producer inicializado via Common");
+        _logger.LogInformation("Kafka Producer inicializado via Common");
     }
 
     public async Task PublishAsync<T>(
@@ -47,7 +47,7 @@ public sealed class KafkaProducerService : IKafkaProducerService, IDisposable
             }
 
             _logger.LogInformation(
-                "📤 Kafka | Topic: {Topic} | Key: {Key} | Offset: {Offset}",
+                "Kafka | Topic: {Topic} | Key: {Key} | Offset: {Offset}",
                 topic, key, result.Offset.Value);
         }
         catch (Exception ex)
@@ -63,7 +63,7 @@ public sealed class KafkaProducerService : IKafkaProducerService, IDisposable
         {
             _producer.Flush(TimeSpan.FromSeconds(5));
             _producer.Dispose();
-            _logger.LogInformation("🛑 Kafka Producer finalizado");
+            _logger.LogInformation("Kafka Producer finalizado");
         }
         catch (Exception ex)
         {

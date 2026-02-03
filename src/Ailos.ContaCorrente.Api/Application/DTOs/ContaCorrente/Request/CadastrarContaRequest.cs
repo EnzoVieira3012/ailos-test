@@ -1,7 +1,4 @@
-using System.Text.Json.Serialization;
-using Ailos.EncryptedId;
-
-namespace Ailos.ContaCorrente.Api.Application.DTOs.ContaCorrente;
+namespace Ailos.ContaCorrente.Api.Application.DTOs.ContaCorrente.Request;
 
 public sealed record CadastrarContaRequest
 {

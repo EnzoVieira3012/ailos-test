@@ -1,5 +1,6 @@
 using Ailos.EncryptedId;
-using Ailos.ContaCorrente.Api.Application.DTOs.ContaCorrente;
+using Ailos.ContaCorrente.Api.Application.DTOs.ContaCorrente.Request;
+using Ailos.ContaCorrente.Api.Application.DTOs.ContaCorrente.Response;
 using Ailos.ContaCorrente.Api.Application.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -132,9 +133,8 @@ public class ContaCorrenteController : ControllerBase
 
     private long GetContaIdFromToken()
     {
-        // PRIORIDADE: ClaimTypes.NameIdentifier (padrão .NET)
         var contaIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? User.FindFirst("contaId")?.Value; // Fallback para compatibilidade
+            ?? User.FindFirst("contaId")?.Value;
         
         if (string.IsNullOrEmpty(contaIdClaim) || !long.TryParse(contaIdClaim, out var contaId))
             throw new UnauthorizedAccessException("Token inválido - contaId não encontrado");

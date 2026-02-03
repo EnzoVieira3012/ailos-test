@@ -29,8 +29,8 @@ public sealed class JwtTokenService : IJwtTokenService
         
         var claims = new List<Claim>
         {
-            new Claim(ClaimTypes.NameIdentifier, userId.ToString()), // Padrão .NET
-            new Claim("contaId", userId.ToString()), // Backup para compatibilidade
+            new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+            new Claim("contaId", userId.ToString()),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
         
@@ -78,14 +78,12 @@ public sealed class JwtTokenService : IJwtTokenService
             
             return principal;
         }
-        catch (SecurityTokenException ex)
+        catch (SecurityTokenException)
         {
-            Console.WriteLine($"❌ Token validation failed: {ex.Message}");
             return null;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            Console.WriteLine($"❌ Unexpected error during token validation: {ex.Message}");
             return null;
         }
     }

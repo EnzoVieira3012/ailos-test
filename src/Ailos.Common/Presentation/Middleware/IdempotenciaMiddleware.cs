@@ -14,21 +14,16 @@ public class IdempotenciaMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        // Este middleware agora é apenas uma estrutura base
-        // As implementações específicas devem ser feitas em cada API
-        
         await _next(context);
     }
 
     private bool ShouldCheckIdempotency(HttpContext context)
     {
-        // Aplicar apenas em endpoints específicos (POST de movimentação)
         return context.Request.Method == HttpMethods.Post;
     }
 
     private string? GetIdempotencyKey(HttpContext context)
     {
-        // Tenta obter do header X-Idempotency-Key
         if (context.Request.Headers.TryGetValue("X-Idempotency-Key", out var key))
             return key.ToString();
 

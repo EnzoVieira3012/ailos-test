@@ -1,4 +1,4 @@
-using Ailos.Tarifa.Worker.Infrastructure.Kafka;
+using Ailos.Tarifa.Worker.Application.Services;
 
 namespace Ailos.Tarifa.Worker;
 

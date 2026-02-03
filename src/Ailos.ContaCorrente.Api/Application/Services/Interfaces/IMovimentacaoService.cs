@@ -1,7 +1,5 @@
-using Ailos.ContaCorrente.Api.Application.DTOs.Movimentacao;
-using Ailos.ContaCorrente.Api.Domain.Entities;
-using Ailos.ContaCorrente.Api.Infrastructure.Repositories;
-using Ailos.EncryptedId;
+using Ailos.ContaCorrente.Api.Application.DTOs.Movimentacao.Request;
+using Ailos.ContaCorrente.Api.Application.DTOs.Movimentacao.Response;
 
 namespace Ailos.ContaCorrente.Api.Application.Services.Interfaces;
 
