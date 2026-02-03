@@ -77,12 +77,10 @@ public sealed class TransferenciaService : ITransferenciaService
                 request.Valor,
                 request.IdentificacaoRequisicao);
 
-            // 6. Aplicar tarifa se configurada
-            if (_tarifaConfig.ValorTarifa > 0)
-            {
-                transferencia.AplicarTarifa(_tarifaConfig.ValorTarifa);
-                _logger.LogDebug("Tarifa aplicada: R$ {Tarifa}", _tarifaConfig.ValorTarifa);
-            }
+            // 6. NÃO APLICAR TARIFA AQUI - será aplicada pelo Tarifa Worker
+            //    Mantemos o campo TarifaAplicada como 0 ou null
+            transferencia.TarifaAplicada = 0;
+            _logger.LogDebug("Tarifa não aplicada na API de Transferência. Será processada pelo Tarifa Worker.");
 
             // 7. Salvar transferência inicial
             var transferenciaSalva = await _transferenciaRepository.InserirAsync(transferencia, cancellationToken);
@@ -271,23 +269,25 @@ public sealed class TransferenciaService : ITransferenciaService
         }
     }
 
+    // No método PublicarTransferenciaNoKafka da Transferência API
     private async Task PublicarTransferenciaNoKafka(
         TransferenciaEntity transferencia,
         CancellationToken cancellationToken)
     {
         try
         {
-            var mensagem = new TransferenciaKafkaMessage
+            var mensagem = new
             {
                 TransferenciaId = transferencia.Id,
                 ContaOrigemId = transferencia.ContaCorrenteOrigemId,
                 ContaDestinoId = transferencia.ContaCorrenteDestinoId,
                 Valor = transferencia.Valor,
-                TarifaAplicada = transferencia.TarifaAplicada ?? 0,
-                DataMovimento = transferencia.DataMovimento
+                TarifaAplicada = 0, // SEM tarifa - o worker vai calcular
+                DataMovimento = transferencia.DataMovimento,
+                IdentificacaoRequisicao = transferencia.IdentificacaoRequisicao
             };
 
-            _logger.LogDebug("Publicando transferência no Kafka: {TransferenciaId}", transferencia.Id);
+            _logger.LogDebug("📤 Publicando transferência no Kafka: {TransferenciaId}", transferencia.Id);
 
             await _kafkaProducerService.PublishAsync(
                 "transferencias-realizadas",
@@ -295,14 +295,11 @@ public sealed class TransferenciaService : ITransferenciaService
                 mensagem,
                 cancellationToken);
 
-
-            _logger.LogInformation("Transferência publicada no Kafka com sucesso: {TransferenciaId}", transferencia.Id);
+            _logger.LogInformation("✅ Transferência publicada no Kafka com sucesso: {TransferenciaId}", transferencia.Id);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao publicar transferência no Kafka: {TransferenciaId}", transferencia.Id);
-            // Não propagamos o erro para não falhar a transferência por causa do Kafka
-            // Em produção, poderíamos implementar uma fila de retry ou dead-letter queue
         }
     }
 
@@ -380,5 +377,7 @@ public sealed class TransferenciaService : ITransferenciaService
 
 public class TarifaConfig
 {
-    public decimal ValorTarifa { get; set; } = 2.00m;
+    // 🔥 Agora esta configuração é usada apenas para manter compatibilidade
+    //    A tarifa real será aplicada pelo Tarifa Worker
+    public decimal ValorTarifa { get; set; } = 0; // Definir como 0
 }

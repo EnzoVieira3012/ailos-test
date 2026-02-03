@@ -5,6 +5,8 @@ using Ailos.Tarifa.Worker.Infrastructure.Repositories;
 using Ailos.Tarifa.Worker.Infrastructure.Repositories.Implementations;
 using Ailos.Common.Infrastructure.Data;
 using Ailos.Common.Configuration;
+using Ailos.Common.Infrastructure.Security;
+using Ailos.EncryptedId; // 🔥 ADICIONAR
 using DotNetEnv;
 using Serilog;
 using Serilog.Events;
@@ -42,7 +44,9 @@ try
         ContaApiUrl = Environment.GetEnvironmentVariable("CONTA_CORRENTE_API_URL"),
         KafkaTransferenciasTopic = Environment.GetEnvironmentVariable("KAFKA_TRANSFERENCIAS_TOPIC"),
         KafkaTarifasTopic = Environment.GetEnvironmentVariable("KAFKA_TARIFAS_TOPIC"),
-        JwtIssuer = Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "Não configurado - OK para worker"
+        JwtSecret = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("JWT_SECRET")),
+        JwtIssuer = Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "AilosBankingSystem",
+        EncryptedIdSecret = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET"))
     };
     
     Log.Information("✅ Variáveis de ambiente carregadas: {@EnvVars}", envVars);
@@ -61,25 +65,47 @@ try
     Log.Information("💾 Banco de dados de tarifas: {DatabasePath}", dbConnection);
     builder.Services.AddSingleton<IDbConnectionFactory>(new SqliteConnectionFactory(dbConnection));
 
-    // 2. Configurações Kafka usando KafkaSettings do Common
+    // 2. 🔥 CONFIGURAR JWT PARA O WORKER
+    Log.Information("🔐 Configurando JWT Token Service para o worker...");
+    var jwtSettings = new JwtSettings
+    {
+        Secret = Environment.GetEnvironmentVariable("JWT_SECRET") 
+            ?? throw new InvalidOperationException("JWT_SECRET não configurada para o worker"),
+        Issuer = Environment.GetEnvironmentVariable("JWT_ISSUER") 
+            ?? "AilosBankingSystem",
+        Audience = Environment.GetEnvironmentVariable("JWT_AUDIENCE") 
+            ?? "AilosClients",
+        ExpirationMinutes = 60
+    };
+    builder.Services.AddSingleton(jwtSettings);
+    builder.Services.AddSingleton<IJwtTokenService>(sp => 
+        new JwtTokenService(Microsoft.Extensions.Options.Options.Create(jwtSettings)));
+    Log.Information("✅ JWT Token Service configurado");
+
+    // 3. 🔥 CONFIGURAR ENCRYPTED ID SERVICE PARA O WORKER
+    Log.Information("🔒 Configurando EncryptedId Service para o worker...");
+    var encryptedIdSecret = Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET")
+        ?? throw new InvalidOperationException("ENCRYPTED_ID_SECRET não configurada para o worker");
+    
+    var encryptedIdService = EncryptedIdFactory.CreateService(encryptedIdSecret);
+    builder.Services.AddSingleton<IEncryptedIdService>(_ => encryptedIdService);
+    Log.Information("✅ EncryptedId Service configurado");
+
+    // 4. Configurações Kafka usando KafkaSettings do Common
     Log.Information("📡 Configurando Kafka usando KafkaSettings do Common...");
     
     var kafkaSettings = new KafkaSettings
     {
-        // Primeiro carrega das variáveis de ambiente
         BootstrapServers = Environment.GetEnvironmentVariable("KAFKA_BOOTSTRAP_SERVERS") ?? "kafka:9092",
         TransferenciasTopic = Environment.GetEnvironmentVariable("KAFKA_TRANSFERENCIAS_TOPIC") ?? "transferencias-realizadas",
         TarifasTopic = Environment.GetEnvironmentVariable("KAFKA_TARIFAS_TOPIC") ?? "tarifas-processadas",
         ConsumerGroup = Environment.GetEnvironmentVariable("KAFKA_CONSUMER_GROUP") ?? "tarifa-worker-group"
     };
 
-    // Também pode carregar do appsettings.json se necessário
     builder.Configuration.GetSection(KafkaSettings.SectionName).Bind(kafkaSettings);
     
-    // 🔥 REGISTRAR AMBAS AS CONFIGURAÇÕES PARA COMPATIBILIDADE
     builder.Services.AddSingleton(kafkaSettings);
     
-    // 🔥 REGISTRAR TAMBÉM COMO KafkaConfig (para compatibilidade com serviços existentes)
     var kafkaConfig = new KafkaConfig
     {
         BootstrapServers = kafkaSettings.BootstrapServers,
@@ -89,19 +115,20 @@ try
     };
     builder.Services.AddSingleton(kafkaConfig);
     
-    Log.Information("✅ Kafka configurado - Servers: {Servers}, Tópico Transferências: {TransferenciasTopic}, Tópico Tarifas: {TarifasTopic}, Grupo: {ConsumerGroup}", 
-        kafkaSettings.BootstrapServers, kafkaSettings.TransferenciasTopic, kafkaSettings.TarifasTopic, kafkaSettings.ConsumerGroup);
+    Log.Information("✅ Kafka configurado - Servers: {Servers}, Tópico: {TransferenciasTopic}, Grupo: {ConsumerGroup}", 
+        kafkaSettings.BootstrapServers, kafkaSettings.TransferenciasTopic, kafkaSettings.ConsumerGroup);
 
-    // 3. Configurações de Tarifa
+    // 5. Configurações de Tarifa
     var tarifaConfig = new TarifaConfig
     {
-        ValorTarifaMinima = 0.01m,
+        ValorTarifaMinima = 2.00m,
         MaxTentativas = 3,
         DelayEntreTentativasMs = 1000
     };
     builder.Services.AddSingleton(tarifaConfig);
+    Log.Information("💰 Tarifa configurada: R$ {ValorTarifa}", tarifaConfig.ValorTarifaMinima);
 
-    // 4. HTTP Client para Conta Corrente API
+    // 6. HTTP Client para Conta Corrente API
     Log.Information("🔗 Configurando cliente HTTP...");
     var contaCorrenteApiUrl = Environment.GetEnvironmentVariable("CONTA_CORRENTE_API_URL")
         ?? "http://conta-corrente-api:80";
@@ -114,17 +141,17 @@ try
         Log.Debug("HTTP Client configurado para: {BaseUrl}", contaCorrenteApiUrl);
     });
 
-    // 5. Repositórios
+    // 7. Repositórios
     Log.Debug("Registrando repositórios...");
     builder.Services.AddScoped<ITarifaRepository, TarifaRepository>();
 
-    // 6. Serviços
+    // 8. Serviços
     Log.Debug("Registrando serviços...");
     builder.Services.AddScoped<ITarifaProcessor, TarifaProcessor>();
     builder.Services.AddScoped<IKafkaConsumerService, KafkaConsumerService>();
     builder.Services.AddSingleton<IKafkaProducerService, KafkaProducerService>();
 
-    // 7. Worker
+    // 9. Worker
     builder.Services.AddHostedService<Worker>();
     Log.Information("👷 Worker registrado");
 
@@ -172,7 +199,6 @@ static async Task InitializeDatabase(IServiceProvider services)
         
         logger.LogInformation("🔗 Conexão com banco de dados aberta");
 
-        // SQL simplificado para tarifas
         var sql = @"
             -- Tabela de tarifas
             CREATE TABLE IF NOT EXISTS tarifa (
@@ -212,7 +238,6 @@ static async Task InitializeDatabase(IServiceProvider services)
         
         logger.LogInformation("✅ Tabelas de tarifa criadas/verificadas");
         
-        // Verificar tabelas
         using var checkCommand = connection.CreateCommand();
         checkCommand.CommandText = @"
             SELECT name FROM sqlite_master 
@@ -235,17 +260,15 @@ static async Task InitializeDatabase(IServiceProvider services)
     }
 }
 
-// ================= CONFIGURAÇÕES =================
+// ================= CLASSES LOCAIS =================
 
 public class TarifaConfig
 {
-    public decimal ValorTarifaMinima { get; set; } = 0.01m;
+    public decimal ValorTarifaMinima { get; set; } = 2.00m;
     public int MaxTentativas { get; set; } = 3;
     public int DelayEntreTentativasMs { get; set; } = 1000;
 }
 
-// 🔥 CLASSE LOCAL PARA COMPATIBILIDADE
-// KafkaConsumerService ainda espera esta classe
 public class KafkaConfig
 {
     public string BootstrapServers { get; set; } = "kafka:9092";

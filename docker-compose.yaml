@@ -15,7 +15,6 @@ services:
       retries: 10
       start_period: 30s
 
-  # Substitua a configuração do Kafka por esta:
   kafka:
     image: confluentinc/cp-kafka:7.4.0
     container_name: ailos-kafka
@@ -37,9 +36,7 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      # Corrija a criação de tópicos
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      # Remova o KAFKA_CREATE_TOPICS - vamos criar via script
       KAFKA_LOG_RETENTION_HOURS: 24
       KAFKA_LOG_RETENTION_BYTES: -1
     networks:
@@ -139,7 +136,8 @@ services:
       - KAFKA_TRANSFERENCIAS_TOPIC=transferencias-realizadas
       - KAFKA_TARIFAS_TOPIC=tarifas-processadas
       - CONTA_CORRENTE_API_URL=http://conta-corrente-api:80
-      - TARIFA_VALOR=2.00
+      # 🔥 REMOVER TARIFA_VALOR - Transferência API não aplica mais tarifa
+      # - TARIFA_VALOR=2.00
     networks:
       - ailos-network
     depends_on:
@@ -170,12 +168,15 @@ services:
       - KAFKA_CONSUMER_GROUP=tarifa-worker-group
       # Conta Corrente API
       - CONTA_CORRENTE_API_URL=http://conta-corrente-api:80
-      # Config de tarifa
-      - TARIFA_VALOR=2.00
-      - TARIFA_MAX_TENTATIVAS=3
-      - TARIFA_DELAY_MS=1000
+      # 🔥 Config de tarifa APENAS no worker
+      - TARIFA_VALOR=${TARIFA_VALOR:-2.00}  # Valor padrão se não definido
+      - TARIFA_MAX_TENTATIVAS=${TARIFA_MAX_TENTATIVAS:-3}
+      - TARIFA_DELAY_MS=${TARIFA_DELAY_MS:-1000}
       # JWT (não é necessário para o worker, mas mantemos para compatibilidade)
+      - JWT_SECRET=${JWT_SECRET}
       - JWT_ISSUER=${JWT_ISSUER}
+      - JWT_AUDIENCE=${JWT_AUDIENCE}
+      - ENCRYPTED_ID_SECRET=${ENCRYPTED_ID_SECRET}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

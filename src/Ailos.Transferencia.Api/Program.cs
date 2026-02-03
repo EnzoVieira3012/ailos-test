@@ -40,11 +40,8 @@ try
     Env.Load();
 
     // 🔥 🔥 🔥 CORREÇÃO CRÍTICA: FORÇAR VALORES CORRETOS DO JWT 🔥 🔥 🔥
-    // O problema é que o método AddAilosCommon está pegando valores errados do appsettings.json
-    // Vamos sobrescrever com os valores corretos antes de configurar os serviços
     Environment.SetEnvironmentVariable("JWT_AUDIENCE", "AilosClients");
     Environment.SetEnvironmentVariable("JWT_ISSUER", "AilosBankingSystem");
-    // Garantir que o JWT_SECRET também está definido
     var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET");
     if (string.IsNullOrEmpty(jwtSecret))
     {
@@ -64,7 +61,6 @@ try
 
     Log.Information("✅ Variáveis de ambiente carregadas: {@EnvVars}", envVars);
 
-    // 🔥 VERIFICAÇÃO EXTRA: Log dos valores JWT que serão usados
     Log.Information("🔐 CONFIGURAÇÃO JWT PARA TRANSFERÊNCIA API:");
     Log.Information("   Issuer: {Issuer}", Environment.GetEnvironmentVariable("JWT_ISSUER"));
     Log.Information("   Audience: {Audience}", Environment.GetEnvironmentVariable("JWT_AUDIENCE"));
@@ -83,7 +79,6 @@ try
     Log.Information("💾 Banco de dados: {DatabasePath}", dbConnection);
 
     // 🔥 REMOVER CONFIGURAÇÕES JWT DO APPSETTINGS PARA EVITAR CONFLITOS
-    // O appsettings.json pode ter valores hardcoded que causam o problema
     builder.Configuration["Jwt:Audience"] = null;
     builder.Configuration["Jwt:Issuer"] = null;
     builder.Configuration["Jwt:Secret"] = null;
@@ -102,12 +97,46 @@ try
     builder.Services.AddSingleton(tarifaConfig);
     Log.Information("💰 Tarifa configurada: R$ {ValorTarifa}", tarifaConfig.ValorTarifa);
 
-    // 4. Encrypted ID
-    var encryptedIdSecret = Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET")
-        ?? throw new InvalidOperationException("ENCRYPTED_ID_SECRET não configurada");
-    builder.Services.AddSingleton<IEncryptedIdService>(_ =>
-        EncryptedIdFactory.CreateService(encryptedIdSecret));
-    Log.Information("🔒 EncryptedID configurado (secret: {SecretLength} chars)", encryptedIdSecret.Length);
+    // 4. 🔥 🔥 🔥 CONFIGURAÇÃO DO ENCRYPTED ID - CORRIGIDA 🔥 🔥 🔥
+    var encryptedIdSecret = Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET");
+    if (string.IsNullOrEmpty(encryptedIdSecret))
+    {
+        Log.Error("❌ ENCRYPTED_ID_SECRET não configurada no .env");
+        throw new InvalidOperationException("ENCRYPTED_ID_SECRET não configurada");
+    }
+
+    try
+    {
+        // Criar o serviço usando a factory
+        var encryptedIdService = EncryptedIdFactory.CreateService(encryptedIdSecret);
+        
+        // Registrar como singleton
+        builder.Services.AddSingleton<IEncryptedIdService>(_ => encryptedIdService);
+        
+        Log.Information("✅ EncryptedID configurado com sucesso");
+        Log.Information("   Secret: {SecretLength} caracteres", encryptedIdSecret.Length);
+        
+        // Testar o serviço para garantir que funciona
+        var testService = EncryptedIdFactory.CreateService(encryptedIdSecret);
+        var testId = 12345;
+        var encrypted = testService.Encrypt(testId);
+        var decrypted = testService.Decrypt(encrypted);
+        
+        if (testId == decrypted)
+        {
+            Log.Information("   ✅ Teste de encrypt/decrypt: OK (ID: {TestId})", testId);
+        }
+        else
+        {
+            Log.Error("   ❌ Teste de encrypt/decrypt falhou!");
+            throw new InvalidOperationException("EncryptedIdService não está funcionando corretamente");
+        }
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "❌ Falha ao configurar EncryptedIdService");
+        throw;
+    }
 
     // 5. Kafka
     Log.Information("📡 Configurando Kafka...");
@@ -140,7 +169,12 @@ try
     builder.Services.AddControllers()
         .AddJsonOptions(options =>
         {
-            options.JsonSerializerOptions.Converters.Add(new EncryptedIdJsonConverter());
+            // 🔥 ADICIONAR CONVERSOR JSON PARA ENCRYPTED ID
+            if (options.JsonSerializerOptions.Converters.All(c => c.GetType() != typeof(EncryptedIdJsonConverter)))
+            {
+                options.JsonSerializerOptions.Converters.Add(new EncryptedIdJsonConverter());
+                Log.Information("✅ EncryptedIdJsonConverter adicionado ao serializador");
+            }
         });
 
     Log.Debug("Controllers configurados");
@@ -209,11 +243,11 @@ try
     app.UseSwaggerUI(c =>
     {
         c.SwaggerEndpoint("/swagger/v1/swagger.json", "Ailos Transferência API v1");
-        c.RoutePrefix = string.Empty; // Swagger em /
+        c.RoutePrefix = string.Empty;
         c.DisplayRequestDuration();
     });
 
-    Log.Information("📚 Swagger habilitado (forçado)");
+    Log.Information("📚 Swagger habilitado");
 
     // 4️⃣ Auth
     app.UseAuthentication();
@@ -229,7 +263,8 @@ try
         service = "transferencia-api",
         database = "connected",
         kafka = "configured",
-        jwt_configured = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("JWT_SECRET"))
+        jwt_configured = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("JWT_SECRET")),
+        encrypted_id_configured = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET"))
     }));
 
     app.MapGet("/healthz", () => "OK");
@@ -242,11 +277,11 @@ try
 
     Log.Information("✅ Banco de dados inicializado");
 
-    // ================= VERIFICAÇÃO FINAL JWT =================
-    // Obter as configurações JWT para confirmar
+    // ================= VERIFICAÇÃO FINAL DOS SERVIÇOS =================
     using var scope = app.Services.CreateScope();
     try
     {
+        // Verificar JWT
         var jwtSettings = scope.ServiceProvider.GetService<Ailos.Common.Configuration.JwtSettings>();
         if (jwtSettings != null)
         {
@@ -254,16 +289,41 @@ try
             Log.Information("   Issuer: {Issuer}", jwtSettings.Issuer);
             Log.Information("   Audience: {Audience}", jwtSettings.Audience);
             Log.Information("   Secret definido: {HasSecret}", !string.IsNullOrEmpty(jwtSettings.Secret));
+        }
+
+        // 🔥 VERIFICAR ENCRYPTED ID SERVICE
+        var encryptedIdService = scope.ServiceProvider.GetService<IEncryptedIdService>();
+        if (encryptedIdService != null)
+        {
+            Log.Information("🔒 ENCRYPTED ID SERVICE VERIFICADO:");
+            Log.Information("   ✅ Serviço registrado e disponível");
             
-            if (jwtSettings.Audience != "AilosClients")
+            // Testar funcionalidade
+            try
             {
-                Log.Warning("⚠️ Audience incorreto: {Audience}. Deveria ser 'AilosClients'", jwtSettings.Audience);
+                var testId = 999;
+                var encrypted = encryptedIdService.Encrypt(testId);
+                var decrypted = encryptedIdService.Decrypt(encrypted);
+                
+                if (testId == decrypted)
+                {
+                    Log.Information("   ✅ Funcionalidade testada com sucesso");
+                    Log.Debug("   Exemplo: ID {TestId} → {Encrypted} → {Decrypted}", testId, encrypted, decrypted);
+                }
             }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "⚠️ Erro ao testar EncryptedIdService");
+            }
+        }
+        else
+        {
+            Log.Error("❌ EncryptedIdService NÃO registrado!");
         }
     }
     catch (Exception ex)
     {
-        Log.Warning(ex, "Não foi possível verificar configurações JWT");
+        Log.Warning(ex, "Não foi possível verificar configurações finais");
     }
 
     // ================= INICIAR APLICAÇÃO =================
@@ -300,7 +360,6 @@ static async Task InitializeDatabase(IServiceProvider services)
 
         logger.LogInformation("🔗 Conexão com banco de dados aberta");
 
-        // SQL para criar tabelas de transferência
         var sql = @"
             -- Tabela principal de transferências
             CREATE TABLE IF NOT EXISTS transferencia (
@@ -390,12 +449,9 @@ public class TarifaConfig
     public decimal ValorTarifa { get; set; } = 2.00m;
 }
 
-// MUDOU AQUI: Renomeei para evitar conflito com KafkaConfig do Common
 public class TransferenciaKafkaConfig
 {
     public string BootstrapServers { get; set; } = "kafka:9092";
     public string TransferenciasTopic { get; set; } = "transferencias-realizadas";
     public string TarifasTopic { get; set; } = "tarifas-processadas";
 }
-
-// ================= MIDDLEWARE DE LOGGING =================
