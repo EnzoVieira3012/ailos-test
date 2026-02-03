@@ -567,7 +567,7 @@ Este projeto está licenciado sob a **Licença MIT** - veja o arquivo [LICENSE](
 
 - **Documentação**: [docs.ailosbank.com](https://docs.ailosbank.com)
 - **Issues**: [GitHub Issues](https://github.com/EnzoVieira3012/ailos-test/issues)
-- **Email**: suporte@ailosbank.com
+- **Email**: enzovieira.trabalho@outlook.com
 - **Slack**: #ailos-developers
 
 ---
