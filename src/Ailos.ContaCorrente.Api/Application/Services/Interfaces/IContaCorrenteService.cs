@@ -1,4 +1,5 @@
-using Ailos.ContaCorrente.Api.Application.DTOs.ContaCorrente;
+using Ailos.ContaCorrente.Api.Application.DTOs.ContaCorrente.Request;
+using Ailos.ContaCorrente.Api.Application.DTOs.ContaCorrente.Response;
 
 namespace Ailos.ContaCorrente.Api.Application.Services.Interfaces;
 

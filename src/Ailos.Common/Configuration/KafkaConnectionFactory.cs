@@ -43,8 +43,7 @@ public class KafkaConnectionFactory
 
         return new ConsumerBuilder<string, string>(config)
             .SetErrorHandler((_, error) =>
-                Console.WriteLine($"Kafka Error: {error.Reason}"))
+            {})
             .Build();
     }
 }
-

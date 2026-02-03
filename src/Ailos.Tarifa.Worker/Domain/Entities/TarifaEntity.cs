@@ -23,7 +23,7 @@ public class TarifaProcessadaEntity
     public string? Mensagem { get; set; }
     public string TopicoKafka { get; set; } = string.Empty;
     public long OffsetKafka { get; set; }
-    public int PartitionKafka { get; set; } // <-- ADICIONAR SE QUISER
+    public int PartitionKafka { get; set; }
 }
 
 public enum StatusProcessamento

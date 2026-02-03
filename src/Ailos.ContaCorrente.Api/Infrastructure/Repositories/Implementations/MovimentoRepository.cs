@@ -30,7 +30,6 @@ public sealed class MovimentoRepository : IMovimentoRepository
         var id = await connection.ExecuteScalarAsync<long>(
             new CommandDefinition(sql, dbModel, cancellationToken: cancellationToken));
 
-        // Criar um novo movimento com o ID
         return new Movimento(dbModel.ContaCorrenteId, dbModel.TipoMovimento, dbModel.Valor, dbModel.Descricao)
         {
             Id = id,
@@ -77,7 +76,6 @@ public sealed class MovimentoRepository : IMovimentoRepository
         return saldo;
     }
 
-    // Modelo para mapeamento do banco
     private class MovimentoDbModel
     {
         public long Id { get; set; }

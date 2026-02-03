@@ -1,4 +1,5 @@
-using Ailos.ContaCorrente.Api.Application.DTOs.Movimentacao;
+using Ailos.ContaCorrente.Api.Application.DTOs.Movimentacao.Request;
+using Ailos.ContaCorrente.Api.Application.DTOs.Movimentacao.Response;
 using Ailos.ContaCorrente.Api.Domain.Entities;
 using Ailos.Common.Domain.Exceptions;
 using Ailos.ContaCorrente.Api.Infrastructure.Repositories.Interfaces;
@@ -31,7 +32,6 @@ public sealed class MovimentacaoService : IMovimentacaoService
         MovimentacaoRequest request,
         CancellationToken cancellationToken = default)
     {
-        // 1. Verificar idempotência ANTES de qualquer processamento
         if (await _idempotenciaService.RequisicaoJaProcessadaAsync(request.IdentificacaoRequisicao, cancellationToken))
         {
             var resultadoAnterior = await _idempotenciaService.ObterResultadoAsync(
@@ -39,7 +39,6 @@ public sealed class MovimentacaoService : IMovimentacaoService
             
             if (!string.IsNullOrEmpty(resultadoAnterior))
             {
-                // Desserializar resultado anterior
                 var resultado = System.Text.Json.JsonSerializer.Deserialize<ResultadoIdempotencia>(resultadoAnterior);
                 
                 if (resultado?.Erro != null)
@@ -56,7 +55,6 @@ public sealed class MovimentacaoService : IMovimentacaoService
             }
         }
 
-        // 2. Registrar início do processamento (sem resultado ainda)
         await _idempotenciaService.RegistrarAsync(
             request.IdentificacaoRequisicao,
             null,
@@ -65,23 +63,19 @@ public sealed class MovimentacaoService : IMovimentacaoService
 
         try
         {
-            // 3. Determinar conta destino
             long contaIdDestino = contaIdUsuarioLogado;
             if (request.ContaCorrenteId.HasValue)
             {
                 contaIdDestino = _encryptedIdService.Decrypt(request.ContaCorrenteId.Value);
                 
-                // 🔴 CORREÇÃO: Validação aprimorada
                 if (contaIdDestino != contaIdUsuarioLogado)
                 {
-                    // Se está tentando movimentar em outra conta
                     if (request.TipoMovimento == "D")
                     {
                         throw new InvalidOperationException(
                             "Débitos só podem ser feitos na própria conta");
                     }
                     
-                    // Para créditos em outras contas, verificar se a conta existe
                     var contaDestino = await _contaRepository.ObterPorIdAsync(contaIdDestino, cancellationToken);
                     if (contaDestino == null)
                         throw new ContaNaoEncontradaException();
@@ -91,22 +85,18 @@ public sealed class MovimentacaoService : IMovimentacaoService
                 }
             }
 
-            // 4. Validar conta (apenas se for a própria conta)
             var conta = await _contaRepository.ObterPorIdAsync(contaIdDestino, cancellationToken)
                 ?? throw new ContaNaoEncontradaException();
 
             if (!conta.Ativo)
                 throw new ContaInativaException();
 
-            // 5. Validar valor
             if (request.Valor <= 0)
                 throw new ValorInvalidoException();
 
-            // 6. Validar tipo de movimento
             if (request.TipoMovimento != "C" && request.TipoMovimento != "D")
                 throw new TipoMovimentoInvalidoException();
 
-            // 7. Para débitos, verificar saldo suficiente
             if (request.TipoMovimento == "D")
             {
                 var saldoAtual = await _movimentoRepository.CalcularSaldoAsync(contaIdDestino, cancellationToken);
@@ -114,7 +104,6 @@ public sealed class MovimentacaoService : IMovimentacaoService
                     throw new SaldoInsuficienteException();
             }
 
-            // 8. Criar movimento
             var movimento = new Movimento(
                 contaIdDestino,
                 request.TipoMovimento[0],
@@ -126,7 +115,6 @@ public sealed class MovimentacaoService : IMovimentacaoService
 
             var encryptedMovimentoId = _encryptedIdService.Encrypt(movimentoSalvo.Id);
 
-            // 9. Preparar resposta
             var response = new MovimentacaoResponse
             {
                 MovimentoId = encryptedMovimentoId,
@@ -134,7 +122,6 @@ public sealed class MovimentacaoService : IMovimentacaoService
                 SaldoAtual = saldoNovo
             };
 
-            // 10. Registrar idempotência com SUCESSO
             var resultadoSucesso = new ResultadoIdempotencia
             {
                 MovimentoId = encryptedMovimentoId.Value,
@@ -152,7 +139,6 @@ public sealed class MovimentacaoService : IMovimentacaoService
         }
         catch (Exception ex)
         {
-            // 11. Em caso de erro, registrar idempotência com ERRO
             var resultadoErro = new ResultadoIdempotencia
             {
                 Erro = ex.Message,
@@ -170,7 +156,6 @@ public sealed class MovimentacaoService : IMovimentacaoService
         }
     }
 
-    // Classe interna para serialização do resultado
     private class ResultadoIdempotencia
     {
         public string? MovimentoId { get; set; }

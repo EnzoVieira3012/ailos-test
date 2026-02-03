@@ -2,20 +2,18 @@ namespace Ailos.Transferencia.Api.Domain.Entities;
 
 public sealed class TransferenciaEntity
 {
-    public long Id { get; set; } // MUDADO: private set -> set
+    public long Id { get; set; }
     public long ContaCorrenteOrigemId { get; private set; }
     public long ContaCorrenteDestinoId { get; private set; }
-    public DateTime DataMovimento { get; set; } // MUDADO: private set -> set
+    public DateTime DataMovimento { get; set; }
     public decimal Valor { get; private set; }
-    public decimal? TarifaAplicada { get; set; } // MUDADO: private set -> set
-    public TransferenciaStatus Status { get; set; } // MUDADO: private set -> set
-    public string? MensagemErro { get; set; } // MUDADO: private set -> set
+    public decimal? TarifaAplicada { get; set; }
+    public TransferenciaStatus Status { get; set; }
+    public string? MensagemErro { get; set; }
     public string? IdentificacaoRequisicao { get; private set; }
 
-    // Construtor privado para ORM/Dapper
     private TransferenciaEntity() { }
 
-    // Construtor principal
     public TransferenciaEntity(
         long contaCorrenteOrigemId,
         long contaCorrenteDestinoId,
@@ -42,7 +40,6 @@ public sealed class TransferenciaEntity
         IdentificacaoRequisicao = identificacaoRequisicao;
     }
 
-    // Construtor para reconstrução completa (usado pelo repositório)
     public TransferenciaEntity(
         long id,
         long contaCorrenteOrigemId,

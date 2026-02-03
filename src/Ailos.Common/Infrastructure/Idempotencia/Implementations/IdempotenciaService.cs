@@ -1,9 +1,7 @@
 using Microsoft.Extensions.Caching.Memory;
-using System.Text.Json;
-using Ailos.Common.Domain.Exceptions;
 using Microsoft.Extensions.Logging;
 
-namespace Ailos.Common.Infrastructure.Idempotencia;
+namespace Ailos.Common.Infrastructure.Implementations.Idempotencia;
 
 public interface IIdempotenciaService
 {

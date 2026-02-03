@@ -1,26 +1,19 @@
 using Confluent.Kafka;
 using Ailos.Common.Configuration;
-using Microsoft.Extensions.Logging;
 
-namespace Ailos.Tarifa.Worker.Infrastructure.Kafka;
-
-public interface IKafkaConsumerService
-{
-    Task ConsumeAsync(CancellationToken cancellationToken);
-    void Dispose();
-}
+namespace Ailos.Tarifa.Worker.Application.Services.Implementations;
 
 public sealed class KafkaConsumerService : IKafkaConsumerService
 {
     private readonly IConsumer<string, string>? _consumer;
-    private readonly Application.Services.ITarifaProcessor _tarifaProcessor;
+    private readonly ITarifaProcessor _tarifaProcessor;
     private readonly ILogger<KafkaConsumerService> _logger;
     private readonly KafkaSettings _settings;
     private bool _disposed;
 
     public KafkaConsumerService(
         KafkaSettings settings,
-        Application.Services.ITarifaProcessor tarifaProcessor,
+        ITarifaProcessor tarifaProcessor,
         ILogger<KafkaConsumerService> logger)
     {
         _settings = settings;
@@ -78,7 +71,6 @@ public sealed class KafkaConsumerService : IKafkaConsumerService
                 _logger.LogDebug("Mensagem recebida - Tópico: {Topic}, Partição: {Partition}, Offset: {Offset}",
                     consumeResult.Topic, consumeResult.Partition, consumeResult.Offset);
 
-                // Processar a mensagem
                 var processado = await _tarifaProcessor.ProcessarMensagemAsync(
                     consumeResult.Message.Value,
                     consumeResult.Topic,
@@ -88,7 +80,6 @@ public sealed class KafkaConsumerService : IKafkaConsumerService
 
                 if (processado)
                 {
-                    // Commit manual do offset
                     _consumer.StoreOffset(consumeResult);
                     _consumer.Commit();
                     

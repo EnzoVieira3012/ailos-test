@@ -23,7 +23,7 @@ public static class JwtExtensions
         })
         .AddJwtBearer(options =>
         {
-            options.RequireHttpsMetadata = false; // Para desenvolvimento
+            options.RequireHttpsMetadata = false;
             options.SaveToken = true;
             options.TokenValidationParameters = new TokenValidationParameters
             {
@@ -42,19 +42,14 @@ public static class JwtExtensions
             {
                 OnAuthenticationFailed = context =>
                 {
-                    Console.WriteLine($"❌ Authentication failed: {context.Exception.Message}");
                     return Task.CompletedTask;
                 },
                 OnTokenValidated = context =>
                 {
-                    var userId = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
-                    var contaId = context.Principal?.FindFirstValue("contaId");
-                    Console.WriteLine($"✅ Token validated - UserId: {userId}, ContaId: {contaId}");
                     return Task.CompletedTask;
                 },
                 OnChallenge = context =>
                 {
-                    Console.WriteLine($"⚠ JWT Challenge: {context.Error}");
                     return Task.CompletedTask;
                 }
             };
@@ -65,8 +60,6 @@ public static class JwtExtensions
     
     public static string GetUserId(this ClaimsPrincipal principal)
     {
-        // PRIORIDADE: contaId (específico do sistema)
-        // FALLBACK: NameIdentifier (padrão .NET)
         return principal.FindFirstValue("contaId")
             ?? principal.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? throw new InvalidOperationException("User ID não encontrado no token");

@@ -1,18 +1,17 @@
 using Ailos.Tarifa.Worker.Application.Services;
-using Ailos.Tarifa.Worker.Infrastructure.Clients;
-using Ailos.Tarifa.Worker.Infrastructure.Kafka;
 using Ailos.Tarifa.Worker.Infrastructure.Repositories;
 using Ailos.Tarifa.Worker.Infrastructure.Repositories.Implementations;
 using Ailos.Common.Infrastructure.Data;
 using Ailos.Common.Configuration;
 using Ailos.Common.Infrastructure.Security;
-using Ailos.EncryptedId; // 🔥 ADICIONAR
+using Ailos.EncryptedId;
 using DotNetEnv;
 using Serilog;
 using Serilog.Events;
 using Ailos.Tarifa.Worker;
+using Ailos.Tarifa.Worker.Infrastructure.Clients.Interfaces;
+using Ailos.Tarifa.Worker.Application.Services.Implementations;
 
-// 🔥 CONFIGURAÇÃO DE LOGS DETALHADA
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
@@ -30,12 +29,11 @@ Log.Logger = new LoggerConfiguration()
 
 try
 {
-    Log.Information("🚀 =========================================");
-    Log.Information("🚀 INICIANDO AILOS TARIFA WORKER");
-    Log.Information("🚀 =========================================");
+    Log.Information("=========================================");
+    Log.Information("INICIANDO AILOS TARIFA WORKER");
+    Log.Information("=========================================");
 
-    // ================= CARREGAR .env =================
-    Log.Information("📁 Carregando variáveis de ambiente...");
+    Log.Information("Carregando variáveis de ambiente...");
     Env.Load();
     
     var envVars = new
@@ -49,24 +47,20 @@ try
         EncryptedIdSecret = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET"))
     };
     
-    Log.Information("✅ Variáveis de ambiente carregadas: {@EnvVars}", envVars);
+    Log.Information("Variáveis de ambiente carregadas: {@EnvVars}", envVars);
 
     var builder = Host.CreateApplicationBuilder(args);
     
-    // 🔥 USAR SERILOG
     builder.Logging.ClearProviders();
     builder.Logging.AddSerilog();
     
-    // ================= CONFIGURAÇÕES =================
-    Log.Information("⚙️ Configurando serviços...");
+    Log.Information("Configurando serviços...");
     
-    // 1. Banco de Dados (APENAS para tarifas)
     var dbConnection = "Data Source=/app/data/tarifas.db";
-    Log.Information("💾 Banco de dados de tarifas: {DatabasePath}", dbConnection);
+    Log.Information("Banco de dados de tarifas: {DatabasePath}", dbConnection);
     builder.Services.AddSingleton<IDbConnectionFactory>(new SqliteConnectionFactory(dbConnection));
 
-    // 2. 🔥 CONFIGURAR JWT PARA O WORKER
-    Log.Information("🔐 Configurando JWT Token Service para o worker...");
+    Log.Information("Configurando JWT Token Service para o worker...");
     var jwtSettings = new JwtSettings
     {
         Secret = Environment.GetEnvironmentVariable("JWT_SECRET") 
@@ -80,19 +74,17 @@ try
     builder.Services.AddSingleton(jwtSettings);
     builder.Services.AddSingleton<IJwtTokenService>(sp => 
         new JwtTokenService(Microsoft.Extensions.Options.Options.Create(jwtSettings)));
-    Log.Information("✅ JWT Token Service configurado");
+    Log.Information("JWT Token Service configurado");
 
-    // 3. 🔥 CONFIGURAR ENCRYPTED ID SERVICE PARA O WORKER
-    Log.Information("🔒 Configurando EncryptedId Service para o worker...");
+    Log.Information("Configurando EncryptedId Service para o worker...");
     var encryptedIdSecret = Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET")
         ?? throw new InvalidOperationException("ENCRYPTED_ID_SECRET não configurada para o worker");
     
     var encryptedIdService = EncryptedIdFactory.CreateService(encryptedIdSecret);
     builder.Services.AddSingleton<IEncryptedIdService>(_ => encryptedIdService);
-    Log.Information("✅ EncryptedId Service configurado");
+    Log.Information("EncryptedId Service configurado");
 
-    // 4. Configurações Kafka usando KafkaSettings do Common
-    Log.Information("📡 Configurando Kafka usando KafkaSettings do Common...");
+    Log.Information("Configurando Kafka usando KafkaSettings do Common...");
     
     var kafkaSettings = new KafkaSettings
     {
@@ -115,10 +107,9 @@ try
     };
     builder.Services.AddSingleton(kafkaConfig);
     
-    Log.Information("✅ Kafka configurado - Servers: {Servers}, Tópico: {TransferenciasTopic}, Grupo: {ConsumerGroup}", 
+    Log.Information("Kafka configurado - Servers: {Servers}, Tópico: {TransferenciasTopic}, Grupo: {ConsumerGroup}", 
         kafkaSettings.BootstrapServers, kafkaSettings.TransferenciasTopic, kafkaSettings.ConsumerGroup);
 
-    // 5. Configurações de Tarifa
     var tarifaConfig = new TarifaConfig
     {
         ValorTarifaMinima = 2.00m,
@@ -126,10 +117,9 @@ try
         DelayEntreTentativasMs = 1000
     };
     builder.Services.AddSingleton(tarifaConfig);
-    Log.Information("💰 Tarifa configurada: R$ {ValorTarifa}", tarifaConfig.ValorTarifaMinima);
+    Log.Information("Tarifa configurada: R$ {ValorTarifa}", tarifaConfig.ValorTarifaMinima);
 
-    // 6. HTTP Client para Conta Corrente API
-    Log.Information("🔗 Configurando cliente HTTP...");
+    Log.Information("Configurando cliente HTTP...");
     var contaCorrenteApiUrl = Environment.GetEnvironmentVariable("CONTA_CORRENTE_API_URL")
         ?? "http://conta-corrente-api:80";
     
@@ -141,42 +131,36 @@ try
         Log.Debug("HTTP Client configurado para: {BaseUrl}", contaCorrenteApiUrl);
     });
 
-    // 7. Repositórios
     Log.Debug("Registrando repositórios...");
     builder.Services.AddScoped<ITarifaRepository, TarifaRepository>();
 
-    // 8. Serviços
     Log.Debug("Registrando serviços...");
     builder.Services.AddScoped<ITarifaProcessor, TarifaProcessor>();
     builder.Services.AddScoped<IKafkaConsumerService, KafkaConsumerService>();
     builder.Services.AddSingleton<IKafkaProducerService, KafkaProducerService>();
 
-    // 9. Worker
     builder.Services.AddHostedService<Worker>();
-    Log.Information("👷 Worker registrado");
+    Log.Information("Worker registrado");
 
-    // ================= CONSTRUIR HOST =================
     var host = builder.Build();
     
-    Log.Information("🏗️ Host construído com sucesso");
+    Log.Information("Host construído com sucesso");
 
-    // ================= INICIALIZAR BANCO DE DADOS =================
-    Log.Information("🔄 Inicializando banco de dados de tarifas...");
+    Log.Information("Inicializando banco de dados de tarifas...");
     await InitializeDatabase(host.Services);
     
-    Log.Information("✅ Banco de dados inicializado");
+    Log.Information("Banco de dados inicializado");
 
-    // ================= INICIAR HOST =================
-    Log.Information("🚀 AILOS TARIFA WORKER INICIADO COM SUCESSO!");
-    Log.Information("📡 Consumindo tópico: {Topic}", kafkaSettings.TransferenciasTopic);
-    Log.Information("👂 Aguardando mensagens Kafka...");
+    Log.Information("AILOS TARIFA WORKER INICIADO COM SUCESSO!");
+    Log.Information("Consumindo tópico: {Topic}", kafkaSettings.TransferenciasTopic);
+    Log.Information("Aguardando mensagens Kafka...");
     Log.Information("=========================================");
 
     await host.RunAsync();
 }
 catch (Exception ex)
 {
-    Log.Fatal(ex, "💥 WORKER FALHOU AO INICIAR");
+    Log.Fatal(ex, "WORKER FALHOU AO INICIAR");
     throw;
 }
 finally
@@ -184,7 +168,6 @@ finally
     Log.CloseAndFlush();
 }
 
-// ================= FUNÇÕES AUXILIARES =================
 
 static async Task InitializeDatabase(IServiceProvider services)
 {
@@ -197,7 +180,7 @@ static async Task InitializeDatabase(IServiceProvider services)
         using var connection = connectionFactory.CreateConnection();
         connection.Open();
         
-        logger.LogInformation("🔗 Conexão com banco de dados aberta");
+        logger.LogInformation("Conexão com banco de dados aberta");
 
         var sql = @"
             -- Tabela de tarifas
@@ -236,7 +219,7 @@ static async Task InitializeDatabase(IServiceProvider services)
         command.CommandText = sql;
         command.ExecuteNonQuery();
         
-        logger.LogInformation("✅ Tabelas de tarifa criadas/verificadas");
+        logger.LogInformation("Tabelas de tarifa criadas/verificadas");
         
         using var checkCommand = connection.CreateCommand();
         checkCommand.CommandText = @"
@@ -251,16 +234,14 @@ static async Task InitializeDatabase(IServiceProvider services)
             tables.Add(reader.GetString(0));
         }
         
-        logger.LogInformation("📊 Tabelas de tarifa existentes: {@Tables}", tables);
+        logger.LogInformation("Tabelas de tarifa existentes: {@Tables}", tables);
     }
     catch (Exception ex)
     {
-        Log.Error(ex, "❌ ERRO ao inicializar banco de dados do tarifa worker");
+        Log.Error(ex, "ERRO ao inicializar banco de dados do tarifa worker");
         throw;
     }
 }
-
-// ================= CLASSES LOCAIS =================
 
 public class TarifaConfig
 {

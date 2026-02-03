@@ -1,36 +1,26 @@
 using System.Net.Http.Json;
-using Microsoft.Extensions.Logging;
 using Ailos.Common.Infrastructure.Security;
 using Ailos.EncryptedId;
 
-namespace Ailos.Tarifa.Worker.Infrastructure.Clients;
-
-public interface IContaCorrenteClient
-{
-    Task<bool> AplicarTarifaAsync(
-        long contaId, 
-        long transferenciaId, 
-        decimal valorTarifa, 
-        CancellationToken cancellationToken = default);
-}
+namespace Ailos.Tarifa.Worker.Infrastructure.Clients.Interfaces;
 
 public sealed class ContaCorrenteClient : IContaCorrenteClient
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<ContaCorrenteClient> _logger;
     private readonly IJwtTokenService _jwtTokenService;
-    private readonly IEncryptedIdService _encryptedIdService; // 🔥 ADICIONADO
+    private readonly IEncryptedIdService _encryptedIdService;
 
     public ContaCorrenteClient(
         HttpClient httpClient, 
         ILogger<ContaCorrenteClient> logger,
         IJwtTokenService jwtTokenService,
-        IEncryptedIdService encryptedIdService) // 🔥 ADICIONADO PARÂMETRO
+        IEncryptedIdService encryptedIdService)
     {
         _httpClient = httpClient;
         _logger = logger;
         _jwtTokenService = jwtTokenService;
-        _encryptedIdService = encryptedIdService; // 🔥 INICIALIZADO
+        _encryptedIdService = encryptedIdService;
     }
 
     public async Task<bool> AplicarTarifaAsync(
@@ -41,10 +31,8 @@ public sealed class ContaCorrenteClient : IContaCorrenteClient
     {
         try
         {
-            // 🔥 1. GERAR TOKEN JWT
             var token = _jwtTokenService.GenerateToken(contaId, "tarifa-worker");
             
-            // 🔥 2. ENCRIPTAR O ID DA CONTA
             var contaIdEncrypted = _encryptedIdService.Encrypt(contaId);
             
             _httpClient.DefaultRequestHeaders.Remove("Authorization");
@@ -53,10 +41,9 @@ public sealed class ContaCorrenteClient : IContaCorrenteClient
             _logger.LogInformation("🔐 Gerando token JWT para conta {ContaId} (Encrypted: {EncryptedId})", 
                 contaId, contaIdEncrypted.Value);
 
-            // 🔥 3. CRIAR REQUEST COM ENCRYPTED ID
             var request = new
             {
-                contaCorrenteId = contaIdEncrypted.Value, // 🔥 AGORA ENVIANDO ENCRYPTED ID
+                contaCorrenteId = contaIdEncrypted.Value,
                 transferenciaId,
                 valor = valorTarifa,
                 descricao = $"Tarifa de transferência #{transferenciaId}",

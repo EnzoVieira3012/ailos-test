@@ -1,4 +1,4 @@
-namespace Ailos.Common.Messaging;
+namespace Ailos.Common.Messaging.Implementations;
 
 public interface IKafkaProducerService
 {

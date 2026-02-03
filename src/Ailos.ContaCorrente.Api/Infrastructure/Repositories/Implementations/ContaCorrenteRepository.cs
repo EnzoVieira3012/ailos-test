@@ -135,7 +135,6 @@ public sealed class ContaCorrenteRepository : IContaCorrenteRepository
             var id = await connection.ExecuteScalarAsync<long>(
                 new CommandDefinition(sql, dbModel, cancellationToken: cancellationToken));
 
-            // Atualiza o ID na entidade
             var contaAtualizada = new ContaDbModel
             {
                 Id = id,
@@ -146,12 +145,12 @@ public sealed class ContaCorrenteRepository : IContaCorrenteRepository
                 Hash = dbModel.Hash,
                 DataCriacao = dbModel.DataCriacao,
                 DataAtualizacao = dbModel.DataAtualizacao,
-                Role = dbModel.Role  // ROLE ADICIONADA
+                Role = dbModel.Role
             };
 
             return contaAtualizada.ToEntity();
         }
-        catch (SqliteException ex) when (ex.SqliteErrorCode == 19) // SQLITE_CONSTRAINT
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
         {
             _logger.LogError(ex, "Violação de constraint ao inserir conta");
             
@@ -243,7 +242,6 @@ public sealed class ContaCorrenteRepository : IContaCorrenteRepository
         }
     }
 
-    // Modelo para mapeamento do banco
     private class ContaDbModel
     {
         public long Id { get; set; }
@@ -251,10 +249,10 @@ public sealed class ContaCorrenteRepository : IContaCorrenteRepository
         public int Numero { get; set; }
         public string Nome { get; set; } = string.Empty;
         public bool Ativo { get; set; }
-        public string Hash { get; set; } = string.Empty; // Apenas hash BCrypt
+        public string Hash { get; set; } = string.Empty;
         public DateTime DataCriacao { get; set; }
         public DateTime? DataAtualizacao { get; set; }
-        public string Role { get; set; } = "conta-corrente";  // PROPRIEDADE ROLE ADICIONADA
+        public string Role { get; set; } = "conta-corrente";
 
         public static ContaDbModel FromEntity(Conta conta)
         {
@@ -268,7 +266,7 @@ public sealed class ContaCorrenteRepository : IContaCorrenteRepository
                 Hash = conta.Senha.Hash,
                 DataCriacao = conta.DataCriacao,
                 DataAtualizacao = conta.DataAtualizacao,
-                Role = conta.Role  // ROLE ADICIONADA
+                Role = conta.Role
             };
         }
 
@@ -286,7 +284,7 @@ public sealed class ContaCorrenteRepository : IContaCorrenteRepository
                 senha,
                 DataCriacao,
                 DataAtualizacao,
-                Role  // ROLE ADICIONADA
+                Role
             );
         }
     }

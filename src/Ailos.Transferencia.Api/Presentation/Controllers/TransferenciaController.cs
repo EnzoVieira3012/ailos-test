@@ -138,7 +138,6 @@ public class TransferenciaController : ControllerBase
     {
         try
         {
-            // Usar o método de extensão do Common
             var contaId = User.GetUserIdAsLong();
             _logger.LogDebug("ContaId extraído do token: {ContaId}", contaId);
             return contaId;

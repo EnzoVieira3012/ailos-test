@@ -1,4 +1,4 @@
-namespace Ailos.Tarifa.Worker.Application.Services;
+namespace Ailos.Tarifa.Worker.Application.Services.Implementations;
 
 public interface ITarifaProcessor
 {

@@ -2,7 +2,6 @@ FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 WORKDIR /app
 EXPOSE 80
 
-# ✅ ADICIONE ESTAS LINHAS PARA DIAGNÓSTICO
 RUN apt-get update && \
     apt-get install -y curl iproute2 procps netcat-openbsd && \
     rm -rf /var/lib/apt/lists/*
@@ -25,7 +24,6 @@ WORKDIR /app
 COPY --from=publish /app/publish .
 RUN mkdir -p /app/data /app/logs && chmod 777 /app/logs
 
-# ✅ ADICIONE HEALTHCHECK REAL
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
   CMD curl -f http://localhost/health || exit 1
 

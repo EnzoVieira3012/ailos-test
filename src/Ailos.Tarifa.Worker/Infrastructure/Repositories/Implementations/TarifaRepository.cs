@@ -1,6 +1,5 @@
 using Dapper;
 using Ailos.Tarifa.Worker.Domain.Entities;
-using Ailos.Tarifa.Worker.Infrastructure.Repositories;
 using Ailos.Common.Infrastructure.Data;
 
 namespace Ailos.Tarifa.Worker.Infrastructure.Repositories.Implementations;

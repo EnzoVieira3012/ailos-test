@@ -2,8 +2,7 @@ using System.Text.Json.Serialization;
 using Ailos.EncryptedId.JsonConverters;
 using EncryptedIdType = Ailos.EncryptedId.EncryptedId;
 
-namespace Ailos.ContaCorrente.Api.Application.DTOs.Movimentacao;
-
+namespace Ailos.ContaCorrente.Api.Application.DTOs.Movimentacao.Request;
 public sealed record MovimentacaoRequest
 {
     public required string IdentificacaoRequisicao { get; init; }

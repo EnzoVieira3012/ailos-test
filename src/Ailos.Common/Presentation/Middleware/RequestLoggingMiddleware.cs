@@ -23,7 +23,6 @@ public class RequestLoggingMiddleware
         _logger.LogDebug("➡️ [REQUEST] {Method} {Path}{QueryString}", 
             request.Method, request.Path, request.QueryString);
         
-        // Log body para POST/PUT (exceto para dados sensíveis)
         if (request.Method == HttpMethods.Post || request.Method == HttpMethods.Put)
         {
             request.EnableBuffering();
@@ -31,7 +30,6 @@ public class RequestLoggingMiddleware
             var body = await reader.ReadToEndAsync();
             request.Body.Position = 0;
             
-            // Não logar senhas ou tokens
             if (!body.Contains("senha", StringComparison.OrdinalIgnoreCase) && 
                 !body.Contains("password", StringComparison.OrdinalIgnoreCase) &&
                 !body.Contains("token", StringComparison.OrdinalIgnoreCase))

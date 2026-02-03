@@ -43,7 +43,7 @@ public sealed class ExceptionMiddleware
             {
                 title = "INTERNAL_ERROR",
                 status = 500,
-                detail = ex.Message // ⚠️ deixa assim para o teste
+                detail = ex.Message
             };
 
             await context.Response.WriteAsync(JsonSerializer.Serialize(response));

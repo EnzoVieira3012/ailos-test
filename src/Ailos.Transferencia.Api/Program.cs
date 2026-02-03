@@ -1,19 +1,18 @@
 using Ailos.Common.Application.Extensions;
 using Ailos.Common.Application.Middleware;
 using Ailos.Common.Infrastructure.Data;
-using Ailos.Common.Messaging;
 using Ailos.Common.Presentation.Middleware;
 using Ailos.EncryptedId;
 using Ailos.EncryptedId.JsonConverters;
 using Ailos.Transferencia.Api.Application.Services;
-using Ailos.Transferencia.Api.Infrastructure.Clients;
+using Ailos.Transferencia.Api.Infrastructure.Clients.Implementations;
+using Ailos.Transferencia.Api.Infrastructure.Clients.Interfaces;
 using Ailos.Transferencia.Api.Infrastructure.Repositories;
 using Ailos.Transferencia.Api.Infrastructure.Repositories.Implementations;
 using DotNetEnv;
 using Serilog;
 using Serilog.Events;
 
-// 🔥 CONFIGURAÇÃO DE LOGS DETALHADA
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
@@ -31,21 +30,13 @@ Log.Logger = new LoggerConfiguration()
 
 try
 {
-    Log.Information("🚀 =========================================");
-    Log.Information("🚀 INICIANDO AILOS TRANSFERÊNCIA API");
-    Log.Information("🚀 =========================================");
-
-    // ================= CARREGAR .env =================
-    Log.Information("📁 Carregando variáveis de ambiente...");
     Env.Load();
 
-    // 🔥 🔥 🔥 CORREÇÃO CRÍTICA: FORÇAR VALORES CORRETOS DO JWT 🔥 🔥 🔥
     Environment.SetEnvironmentVariable("JWT_AUDIENCE", "AilosClients");
     Environment.SetEnvironmentVariable("JWT_ISSUER", "AilosBankingSystem");
     var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET");
     if (string.IsNullOrEmpty(jwtSecret))
     {
-        Log.Error("❌ JWT_SECRET não configurado no .env");
         throw new InvalidOperationException("JWT_SECRET não configurado");
     }
 
@@ -59,92 +50,54 @@ try
         ContaApiUrl = Environment.GetEnvironmentVariable("CONTA_CORRENTE_API_URL")
     };
 
-    Log.Information("✅ Variáveis de ambiente carregadas: {@EnvVars}", envVars);
-
-    Log.Information("🔐 CONFIGURAÇÃO JWT PARA TRANSFERÊNCIA API:");
-    Log.Information("   Issuer: {Issuer}", Environment.GetEnvironmentVariable("JWT_ISSUER"));
-    Log.Information("   Audience: {Audience}", Environment.GetEnvironmentVariable("JWT_AUDIENCE"));
-    Log.Information("   Secret configurado: {HasSecret}", !string.IsNullOrEmpty(jwtSecret));
-
     var builder = WebApplication.CreateBuilder(args);
 
-    // 🔥 USAR SERILOG
     builder.Host.UseSerilog();
 
-    // ================= CONFIGURAÇÕES =================
-    Log.Debug("Configurando serviços da aplicação...");
-
-    // 1. Connection String do banco
     var dbConnection = "Data Source=/app/data/transferencia.db";
-    Log.Information("💾 Banco de dados: {DatabasePath}", dbConnection);
 
-    // 🔥 REMOVER CONFIGURAÇÕES JWT DO APPSETTINGS PARA EVITAR CONFLITOS
     builder.Configuration["Jwt:Audience"] = null;
     builder.Configuration["Jwt:Issuer"] = null;
     builder.Configuration["Jwt:Secret"] = null;
 
-    // 2. Configurar Common com JWT e banco
-    Log.Information("🔐 Configurando autenticação JWT...");
     builder.Services.AddAilosCommon(builder.Configuration, dbConnection);
-    Log.Information("✅ Common configurado com JWT e banco de dados");
 
-    // 3. Configurações de negócio
     var tarifaConfig = new TarifaConfig
     {
         ValorTarifa = decimal.TryParse(Environment.GetEnvironmentVariable("TARIFA_VALOR"), out var tarifa)
             ? tarifa : 2.00m
     };
     builder.Services.AddSingleton(tarifaConfig);
-    Log.Information("💰 Tarifa configurada: R$ {ValorTarifa}", tarifaConfig.ValorTarifa);
 
-    // 4. 🔥 🔥 🔥 CONFIGURAÇÃO DO ENCRYPTED ID - CORRIGIDA 🔥 🔥 🔥
     var encryptedIdSecret = Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET");
     if (string.IsNullOrEmpty(encryptedIdSecret))
     {
-        Log.Error("❌ ENCRYPTED_ID_SECRET não configurada no .env");
         throw new InvalidOperationException("ENCRYPTED_ID_SECRET não configurada");
     }
 
     try
     {
-        // Criar o serviço usando a factory
         var encryptedIdService = EncryptedIdFactory.CreateService(encryptedIdSecret);
         
-        // Registrar como singleton
         builder.Services.AddSingleton<IEncryptedIdService>(_ => encryptedIdService);
         
-        Log.Information("✅ EncryptedID configurado com sucesso");
-        Log.Information("   Secret: {SecretLength} caracteres", encryptedIdSecret.Length);
-        
-        // Testar o serviço para garantir que funciona
         var testService = EncryptedIdFactory.CreateService(encryptedIdSecret);
         var testId = 12345;
         var encrypted = testService.Encrypt(testId);
         var decrypted = testService.Decrypt(encrypted);
         
-        if (testId == decrypted)
+        if (testId != decrypted)
         {
-            Log.Information("   ✅ Teste de encrypt/decrypt: OK (ID: {TestId})", testId);
-        }
-        else
-        {
-            Log.Error("   ❌ Teste de encrypt/decrypt falhou!");
             throw new InvalidOperationException("EncryptedIdService não está funcionando corretamente");
         }
     }
-    catch (Exception ex)
+    catch (Exception)
     {
-        Log.Error(ex, "❌ Falha ao configurar EncryptedIdService");
         throw;
     }
 
-    // 5. Kafka
-    Log.Information("📡 Configurando Kafka...");
     builder.Services.AddAilosKafka(builder.Configuration);
-    Log.Information("✅ Kafka configurado via Ailos.Common");
 
-    // 6. HTTP Client para Conta Corrente API
-    Log.Information("🔗 Configurando cliente HTTP...");
     var contaCorrenteApiUrl = Environment.GetEnvironmentVariable("CONTA_CORRENTE_API_URL")
         ?? "http://conta-corrente-api:80";
 
@@ -152,35 +105,23 @@ try
     {
         client.BaseAddress = new Uri(contaCorrenteApiUrl);
         client.Timeout = TimeSpan.FromSeconds(30);
-        Log.Debug("HTTP Client configurado para: {BaseUrl}", contaCorrenteApiUrl);
     });
 
-    // ================= REPOSITÓRIOS =================
-    Log.Debug("Registrando repositórios...");
     builder.Services.AddScoped<ITransferenciaRepository, TransferenciaRepository>();
     builder.Services.AddScoped<IIdempotenciaRepository, IdempotenciaRepository>();
 
-    // ================= SERVIÇOS =================
-    Log.Debug("Registrando serviços de aplicação...");
     builder.Services.AddScoped<ITransferenciaService, TransferenciaService>();
     builder.Services.AddScoped<IIdempotenciaService, IdempotenciaService>();
 
-    // ================= CONTROLLERS =================
     builder.Services.AddControllers()
         .AddJsonOptions(options =>
         {
-            // 🔥 ADICIONAR CONVERSOR JSON PARA ENCRYPTED ID
             if (options.JsonSerializerOptions.Converters.All(c => c.GetType() != typeof(EncryptedIdJsonConverter)))
             {
                 options.JsonSerializerOptions.Converters.Add(new EncryptedIdJsonConverter());
-                Log.Information("✅ EncryptedIdJsonConverter adicionado ao serializador");
             }
         });
 
-    Log.Debug("Controllers configurados");
-
-    // ================= SWAGGER =================
-    Log.Debug("Configurando Swagger/OpenAPI...");
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerGen(c =>
     {
@@ -216,29 +157,16 @@ try
         });
     });
 
-    Log.Information("📚 Swagger configurado");
-
-    // ================= INFRAESTRUTURA =================
     builder.Services.AddMemoryCache();
     builder.Services.AddHealthChecks();
-    Log.Debug("Serviços de infraestrutura configurados");
 
-    // ================= CONSTRUIR APLICAÇÃO =================
     var app = builder.Build();
 
-    Log.Information("🏗️ Aplicação construída com sucesso");
-
-    // ================= MIDDLEWARE PIPELINE =================
-    Log.Debug("Configurando pipeline de middleware...");
-
-    // 🔥 1️⃣ Routing PRIMEIRO
     app.UseRouting();
 
-    // 2️⃣ Middlewares customizados
     app.UseMiddleware<RequestLoggingMiddleware>();
     app.UseMiddleware<ExceptionMiddleware>();
 
-    // 3️⃣ Swagger
     app.UseSwagger();
     app.UseSwaggerUI(c =>
     {
@@ -247,13 +175,9 @@ try
         c.DisplayRequestDuration();
     });
 
-    Log.Information("📚 Swagger habilitado");
-
-    // 4️⃣ Auth
     app.UseAuthentication();
     app.UseAuthorization();
 
-    // 5️⃣ Endpoints
     app.MapControllers();
 
     app.MapGet("/health", () => Results.Json(new
@@ -269,75 +193,35 @@ try
 
     app.MapGet("/healthz", () => "OK");
 
-    Log.Information("❤️ Health check disponível em /health");
-
-    // ================= INICIALIZAR BANCO DE DADOS =================
-    Log.Information("🔄 Inicializando banco de dados...");
     await InitializeDatabase(app.Services);
 
-    Log.Information("✅ Banco de dados inicializado");
-
-    // ================= VERIFICAÇÃO FINAL DOS SERVIÇOS =================
     using var scope = app.Services.CreateScope();
     try
     {
-        // Verificar JWT
         var jwtSettings = scope.ServiceProvider.GetService<Ailos.Common.Configuration.JwtSettings>();
-        if (jwtSettings != null)
-        {
-            Log.Information("🔐 CONFIGURAÇÃO JWT FINAL:");
-            Log.Information("   Issuer: {Issuer}", jwtSettings.Issuer);
-            Log.Information("   Audience: {Audience}", jwtSettings.Audience);
-            Log.Information("   Secret definido: {HasSecret}", !string.IsNullOrEmpty(jwtSettings.Secret));
-        }
-
-        // 🔥 VERIFICAR ENCRYPTED ID SERVICE
+        
         var encryptedIdService = scope.ServiceProvider.GetService<IEncryptedIdService>();
         if (encryptedIdService != null)
         {
-            Log.Information("🔒 ENCRYPTED ID SERVICE VERIFICADO:");
-            Log.Information("   ✅ Serviço registrado e disponível");
-            
-            // Testar funcionalidade
             try
             {
                 var testId = 999;
                 var encrypted = encryptedIdService.Encrypt(testId);
                 var decrypted = encryptedIdService.Decrypt(encrypted);
-                
-                if (testId == decrypted)
-                {
-                    Log.Information("   ✅ Funcionalidade testada com sucesso");
-                    Log.Debug("   Exemplo: ID {TestId} → {Encrypted} → {Decrypted}", testId, encrypted, decrypted);
-                }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Log.Warning(ex, "⚠️ Erro ao testar EncryptedIdService");
             }
         }
-        else
-        {
-            Log.Error("❌ EncryptedIdService NÃO registrado!");
-        }
     }
-    catch (Exception ex)
+    catch (Exception)
     {
-        Log.Warning(ex, "Não foi possível verificar configurações finais");
     }
-
-    // ================= INICIAR APLICAÇÃO =================
-    Log.Information("🚀 AILOS TRANSFERÊNCIA API INICIADA COM SUCESSO!");
-    Log.Information("🌐 URL: http://localhost:5081");
-    Log.Information("📚 Swagger: http://localhost:5081");
-    Log.Information("❤️ Health: http://localhost:5081/health");
-    Log.Information("=========================================");
 
     app.Run();
 }
-catch (Exception ex)
+catch (Exception)
 {
-    Log.Fatal(ex, "💥 APLICAÇÃO FALHOU AO INICIAR");
     throw;
 }
 finally
@@ -345,20 +229,15 @@ finally
     Log.CloseAndFlush();
 }
 
-// ================= FUNÇÕES AUXILIARES =================
-
 static async Task InitializeDatabase(IServiceProvider services)
 {
     try
     {
         using var scope = services.CreateScope();
         var connectionFactory = scope.ServiceProvider.GetRequiredService<IDbConnectionFactory>();
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
         using var connection = connectionFactory.CreateConnection();
         connection.Open();
-
-        logger.LogInformation("🔗 Conexão com banco de dados aberta");
 
         var sql = @"
             -- Tabela principal de transferências
@@ -394,7 +273,6 @@ static async Task InitializeDatabase(IServiceProvider services)
         ";
 
         var commands = sql.Split(';', StringSplitOptions.RemoveEmptyEntries);
-        int executed = 0;
 
         foreach (var commandText in commands.Where(c => !string.IsNullOrWhiteSpace(c)))
         {
@@ -406,43 +284,18 @@ static async Task InitializeDatabase(IServiceProvider services)
                     using var command = connection.CreateCommand();
                     command.CommandText = trimmedCommand;
                     command.ExecuteNonQuery();
-                    executed++;
-
-                    logger.LogDebug("📝 SQL executado: {Command}", trimmedCommand.Substring(0, Math.Min(50, trimmedCommand.Length)));
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    logger.LogWarning(ex, "⚠️ Comando SQL ignorado: {ErrorMessage}", ex.Message);
                 }
             }
         }
-
-        logger.LogInformation("✅ Banco de transferência inicializado: {Comandos} comandos executados", executed);
-
-        using var checkCommand = connection.CreateCommand();
-        checkCommand.CommandText = @"
-            SELECT name FROM sqlite_master 
-            WHERE type='table' 
-            AND name IN ('transferencia', 'idempotencia')
-            ORDER BY name";
-
-        using var reader = checkCommand.ExecuteReader();
-        var tables = new List<string>();
-        while (reader.Read())
-        {
-            tables.Add(reader.GetString(0));
-        }
-
-        logger.LogInformation("📊 Tabelas existentes: {@Tables}", tables);
     }
-    catch (Exception ex)
+    catch (Exception)
     {
-        Log.Error(ex, "❌ ERRO CRÍTICO ao inicializar banco de dados");
         throw;
     }
 }
-
-// ================= CLASSES DE CONFIGURAÇÃO =================
 
 public class TarifaConfig
 {
