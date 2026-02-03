@@ -12,6 +12,7 @@ public sealed class Conta
     public Senha Senha { get; private set; } = null!;
     public DateTime DataCriacao { get; private set; }
     public DateTime? DataAtualizacao { get; private set; }
+    public string Role { get; private set; } = "conta-corrente";  // PROPRIEDADE ROLE ADICIONADA
 
     private Conta() { } // Para ORM
 
@@ -24,11 +25,12 @@ public sealed class Conta
         Ativo = true;
         DataCriacao = DateTime.UtcNow;
         Numero = 0; // Será gerado
+        Role = "conta-corrente"; // Valor padrão
     }
 
     // Construtor interno para reconstrução do repositório
     internal Conta(long id, Cpf cpf, int numero, string nome, bool ativo, 
-                   Senha senha, DateTime dataCriacao, DateTime? dataAtualizacao)
+                   Senha senha, DateTime dataCriacao, DateTime? dataAtualizacao, string role)
     {
         Id = id;
         Cpf = cpf;
@@ -38,6 +40,7 @@ public sealed class Conta
         Senha = senha;
         DataCriacao = dataCriacao;
         DataAtualizacao = dataAtualizacao;
+        Role = role;
     }
 
     public void Inativar()

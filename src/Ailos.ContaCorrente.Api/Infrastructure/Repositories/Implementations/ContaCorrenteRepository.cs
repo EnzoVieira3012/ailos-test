@@ -31,7 +31,8 @@ public sealed class ContaCorrenteRepository : IContaCorrenteRepository
                 ativo as Ativo,
                 senha_hash as Hash,
                 data_criacao as DataCriacao,
-                data_atualizacao as DataAtualizacao
+                data_atualizacao as DataAtualizacao,
+                role as Role  -- COLUNA ROLE ADICIONADA
             FROM contacorrente
             WHERE idcontacorrente = @Id";
 
@@ -62,7 +63,8 @@ public sealed class ContaCorrenteRepository : IContaCorrenteRepository
                 ativo as Ativo,
                 senha_hash as Hash,
                 data_criacao as DataCriacao,
-                data_atualizacao as DataAtualizacao
+                data_atualizacao as DataAtualizacao,
+                role as Role  -- COLUNA ROLE ADICIONADA
             FROM contacorrente
             WHERE numero = @Numero";
 
@@ -93,7 +95,8 @@ public sealed class ContaCorrenteRepository : IContaCorrenteRepository
                 ativo as Ativo,
                 senha_hash as Hash,
                 data_criacao as DataCriacao,
-                data_atualizacao as DataAtualizacao
+                data_atualizacao as DataAtualizacao,
+                role as Role  -- COLUNA ROLE ADICIONADA
             FROM contacorrente
             WHERE cpf = @Cpf";
 
@@ -117,9 +120,9 @@ public sealed class ContaCorrenteRepository : IContaCorrenteRepository
 
         const string sql = @"
             INSERT INTO contacorrente 
-                (cpf, numero, nome, ativo, senha_hash, data_criacao)
+                (cpf, numero, nome, ativo, senha_hash, data_criacao, role)
             VALUES 
-                (@Cpf, @Numero, @Nome, @Ativo, @Hash, @DataCriacao);
+                (@Cpf, @Numero, @Nome, @Ativo, @Hash, @DataCriacao, @Role);
             SELECT last_insert_rowid();";
 
         var numero = await ObterProximoNumeroAsync(cancellationToken);
@@ -142,7 +145,8 @@ public sealed class ContaCorrenteRepository : IContaCorrenteRepository
                 Ativo = dbModel.Ativo,
                 Hash = dbModel.Hash,
                 DataCriacao = dbModel.DataCriacao,
-                DataAtualizacao = dbModel.DataAtualizacao
+                DataAtualizacao = dbModel.DataAtualizacao,
+                Role = dbModel.Role  // ROLE ADICIONADA
             };
 
             return contaAtualizada.ToEntity();
@@ -177,7 +181,8 @@ public sealed class ContaCorrenteRepository : IContaCorrenteRepository
             SET 
                 nome = @Nome,
                 ativo = @Ativo,
-                data_atualizacao = @DataAtualizacao
+                data_atualizacao = @DataAtualizacao,
+                role = @Role  -- ROLE ADICIONADA
             WHERE idcontacorrente = @Id";
 
         var dbModel = ContaDbModel.FromEntity(conta);
@@ -249,6 +254,7 @@ public sealed class ContaCorrenteRepository : IContaCorrenteRepository
         public string Hash { get; set; } = string.Empty; // Apenas hash BCrypt
         public DateTime DataCriacao { get; set; }
         public DateTime? DataAtualizacao { get; set; }
+        public string Role { get; set; } = "conta-corrente";  // PROPRIEDADE ROLE ADICIONADA
 
         public static ContaDbModel FromEntity(Conta conta)
         {
@@ -261,7 +267,8 @@ public sealed class ContaCorrenteRepository : IContaCorrenteRepository
                 Ativo = conta.Ativo,
                 Hash = conta.Senha.Hash,
                 DataCriacao = conta.DataCriacao,
-                DataAtualizacao = conta.DataAtualizacao
+                DataAtualizacao = conta.DataAtualizacao,
+                Role = conta.Role  // ROLE ADICIONADA
             };
         }
 
@@ -278,7 +285,8 @@ public sealed class ContaCorrenteRepository : IContaCorrenteRepository
                 Ativo,
                 senha,
                 DataCriacao,
-                DataAtualizacao
+                DataAtualizacao,
+                Role  // ROLE ADICIONADA
             );
         }
     }

@@ -206,6 +206,7 @@ static async Task InitializeDatabase(IServiceProvider services)
                 senha_hash TEXT NOT NULL,
                 data_criacao TEXT NOT NULL DEFAULT (datetime('now')),
                 data_atualizacao TEXT,
+                role TEXT DEFAULT 'conta-corrente',
                 CHECK (ativo IN (0, 1))
             );
 

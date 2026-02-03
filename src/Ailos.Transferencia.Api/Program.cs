@@ -39,15 +39,36 @@ try
     Log.Information("📁 Carregando variáveis de ambiente...");
     Env.Load();
 
+    // 🔥 🔥 🔥 CORREÇÃO CRÍTICA: FORÇAR VALORES CORRETOS DO JWT 🔥 🔥 🔥
+    // O problema é que o método AddAilosCommon está pegando valores errados do appsettings.json
+    // Vamos sobrescrever com os valores corretos antes de configurar os serviços
+    Environment.SetEnvironmentVariable("JWT_AUDIENCE", "AilosClients");
+    Environment.SetEnvironmentVariable("JWT_ISSUER", "AilosBankingSystem");
+    // Garantir que o JWT_SECRET também está definido
+    var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET");
+    if (string.IsNullOrEmpty(jwtSecret))
+    {
+        Log.Error("❌ JWT_SECRET não configurado no .env");
+        throw new InvalidOperationException("JWT_SECRET não configurado");
+    }
+
     var envVars = new
     {
         EncryptedIdLoaded = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ENCRYPTED_ID_SECRET")),
-        JwtSecretLoaded = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("JWT_SECRET")),
+        JwtSecretLoaded = !string.IsNullOrEmpty(jwtSecret),
+        JwtIssuer = Environment.GetEnvironmentVariable("JWT_ISSUER"),
+        JwtAudience = Environment.GetEnvironmentVariable("JWT_AUDIENCE"),
         KafkaServers = Environment.GetEnvironmentVariable("KAFKA_BOOTSTRAP_SERVERS"),
         ContaApiUrl = Environment.GetEnvironmentVariable("CONTA_CORRENTE_API_URL")
     };
 
     Log.Information("✅ Variáveis de ambiente carregadas: {@EnvVars}", envVars);
+
+    // 🔥 VERIFICAÇÃO EXTRA: Log dos valores JWT que serão usados
+    Log.Information("🔐 CONFIGURAÇÃO JWT PARA TRANSFERÊNCIA API:");
+    Log.Information("   Issuer: {Issuer}", Environment.GetEnvironmentVariable("JWT_ISSUER"));
+    Log.Information("   Audience: {Audience}", Environment.GetEnvironmentVariable("JWT_AUDIENCE"));
+    Log.Information("   Secret configurado: {HasSecret}", !string.IsNullOrEmpty(jwtSecret));
 
     var builder = WebApplication.CreateBuilder(args);
 
@@ -60,6 +81,12 @@ try
     // 1. Connection String do banco
     var dbConnection = "Data Source=/app/data/transferencia.db";
     Log.Information("💾 Banco de dados: {DatabasePath}", dbConnection);
+
+    // 🔥 REMOVER CONFIGURAÇÕES JWT DO APPSETTINGS PARA EVITAR CONFLITOS
+    // O appsettings.json pode ter valores hardcoded que causam o problema
+    builder.Configuration["Jwt:Audience"] = null;
+    builder.Configuration["Jwt:Issuer"] = null;
+    builder.Configuration["Jwt:Secret"] = null;
 
     // 2. Configurar Common com JWT e banco
     Log.Information("🔐 Configurando autenticação JWT...");
@@ -86,7 +113,6 @@ try
     Log.Information("📡 Configurando Kafka...");
     builder.Services.AddAilosKafka(builder.Configuration);
     Log.Information("✅ Kafka configurado via Ailos.Common");
-
 
     // 6. HTTP Client para Conta Corrente API
     Log.Information("🔗 Configurando cliente HTTP...");
@@ -202,19 +228,43 @@ try
         timestamp = DateTime.UtcNow,
         service = "transferencia-api",
         database = "connected",
-        kafka = "configured"
+        kafka = "configured",
+        jwt_configured = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("JWT_SECRET"))
     }));
 
     app.MapGet("/healthz", () => "OK");
 
     Log.Information("❤️ Health check disponível em /health");
 
-
     // ================= INICIALIZAR BANCO DE DADOS =================
     Log.Information("🔄 Inicializando banco de dados...");
     await InitializeDatabase(app.Services);
 
     Log.Information("✅ Banco de dados inicializado");
+
+    // ================= VERIFICAÇÃO FINAL JWT =================
+    // Obter as configurações JWT para confirmar
+    using var scope = app.Services.CreateScope();
+    try
+    {
+        var jwtSettings = scope.ServiceProvider.GetService<Ailos.Common.Configuration.JwtSettings>();
+        if (jwtSettings != null)
+        {
+            Log.Information("🔐 CONFIGURAÇÃO JWT FINAL:");
+            Log.Information("   Issuer: {Issuer}", jwtSettings.Issuer);
+            Log.Information("   Audience: {Audience}", jwtSettings.Audience);
+            Log.Information("   Secret definido: {HasSecret}", !string.IsNullOrEmpty(jwtSettings.Secret));
+            
+            if (jwtSettings.Audience != "AilosClients")
+            {
+                Log.Warning("⚠️ Audience incorreto: {Audience}. Deveria ser 'AilosClients'", jwtSettings.Audience);
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        Log.Warning(ex, "Não foi possível verificar configurações JWT");
+    }
 
     // ================= INICIAR APLICAÇÃO =================
     Log.Information("🚀 AILOS TRANSFERÊNCIA API INICIADA COM SUCESSO!");

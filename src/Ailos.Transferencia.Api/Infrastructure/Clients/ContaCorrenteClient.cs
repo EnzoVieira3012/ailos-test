@@ -42,18 +42,19 @@ public sealed class ContaCorrenteClient : IContaCorrenteClient
     {
         try
         {
-            // Gerar token JWT usando o serviço do Common
-            var token = _jwtTokenService.GenerateToken(contaId, "transferencia");
-            
-            _logger.LogDebug("Gerando token JWT para conta {ContaId}", contaId);
-            
-            // Configurar header de autenticação
-            _httpClient.DefaultRequestHeaders.Authorization = 
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-            
-            _logger.LogDebug("Token gerado com sucesso: {TokenLength} caracteres", token.Length);
+            // NORMALIZA O TIPO DE MOVIMENTO (CORREÇÃO PRINCIPAL)
+            tipoMovimento = tipoMovimento?.Trim().ToUpper() switch
+            {
+                "C" or "CREDITO" => "C",
+                "D" or "DEBITO"  => "D",
+                _ => throw new ValidationException("Tipo de movimento inválido")
+            };
 
-            // Preparar request
+            var token = _jwtTokenService.GenerateToken(contaId, "transferencia");
+
+            _httpClient.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
             var request = new
             {
                 identificacaoRequisicao,
@@ -68,31 +69,43 @@ public sealed class ContaCorrenteClient : IContaCorrenteClient
                 Encoding.UTF8,
                 "application/json");
 
-            _logger.LogInformation("Enviando movimentação para conta {ContaId}: {Tipo} R$ {Valor}", 
+            _logger.LogInformation(
+                "Enviando movimentação: Conta={ContaId}, Tipo={Tipo}, Valor={Valor}",
                 contaId, tipoMovimento, valor);
 
-            var response = await _httpClient.PostAsync("/api/movimentacao", content, cancellationToken);
+            var response = await _httpClient.PostAsync(
+                "/api/movimentacao",
+                content,
+                cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
                 var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-                _logger.LogError("Erro na movimentação: {StatusCode} - {Content}", 
-                    response.StatusCode, errorContent);
-                
+
+                _logger.LogError(
+                    "Erro na movimentação: {StatusCode} - {Content}",
+                    response.StatusCode,
+                    errorContent);
+
                 var error = JsonSerializer.Deserialize<ErrorResponse>(errorContent);
 
                 var errorMessage = error?.Detail ?? "Erro na movimentação";
-                var errorType = error?.Extensions?.GetValueOrDefault("errorType")?.ToString() ?? "MOVIMENTATION_ERROR";
-                
+                var errorType = error?.Extensions?
+                    .GetValueOrDefault("errorType")?.ToString()
+                    ?? "MOVIMENTATION_ERROR";
+
                 throw new ValidationException($"{errorMessage} ({errorType})");
             }
-            
-            _logger.LogInformation("Movimentação concluída com sucesso para conta {ContaId}", contaId);
+
+            _logger.LogInformation(
+                "Movimentação realizada com sucesso para conta {ContaId}",
+                contaId);
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, "Erro de conexão com Conta Corrente API");
-            throw new ValidationException($"Falha na conexão com serviço de conta corrente: {ex.Message}");
+            _logger.LogError(ex, "Falha de comunicação com Conta Corrente API");
+            throw new ValidationException(
+                $"Falha na comunicação com serviço de conta corrente: {ex.Message}");
         }
         catch (Exception ex)
         {

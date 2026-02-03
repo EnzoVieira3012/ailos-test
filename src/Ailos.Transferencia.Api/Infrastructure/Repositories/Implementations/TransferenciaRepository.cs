@@ -14,21 +14,23 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
         _connectionFactory = connectionFactory;
     }
 
-    public async Task<TransferenciaEntity?> ObterPorIdAsync(long id, CancellationToken cancellationToken = default)
+    public async Task<TransferenciaEntity?> ObterPorIdAsync(
+        long id,
+        CancellationToken cancellationToken = default)
     {
         using var connection = _connectionFactory.CreateConnection();
 
         const string sql = @"
             SELECT 
-                idtransferencia as Id,
-                idcontacorrente_origem as ContaCorrenteOrigemId,
-                idcontacorrente_destino as ContaCorrenteDestinoId,
-                datamovimento as DataMovimento,
-                valor as Valor,
-                tarifa_aplicada as TarifaAplicada,
-                status as Status,
-                mensagem_erro as MensagemErro,
-                identificacao_requisicao as IdentificacaoRequisicao
+                idtransferencia AS Id,
+                idcontacorrente_origem AS ContaCorrenteOrigemId,
+                idcontacorrente_destino AS ContaCorrenteDestinoId,
+                datamovimento AS DataMovimento,
+                valor AS Valor,
+                tarifa_aplicada AS TarifaAplicada,
+                status AS Status,
+                mensagem_erro AS MensagemErro,
+                identificacao_requisicao AS IdentificacaoRequisicao
             FROM transferencia
             WHERE idtransferencia = @Id";
 
@@ -39,7 +41,7 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
     }
 
     public async Task<TransferenciaEntity> InserirAsync(
-        TransferenciaEntity transferencia, 
+        TransferenciaEntity transferencia,
         CancellationToken cancellationToken = default)
     {
         using var connection = _connectionFactory.CreateConnection();
@@ -58,23 +60,13 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
         var id = await connection.ExecuteScalarAsync<long>(
             new CommandDefinition(sql, dbModel, cancellationToken: cancellationToken));
 
-        // Usar o novo construtor completo
-        var transferenciaAtualizada = new TransferenciaEntity(
-            id: id,
-            contaCorrenteOrigemId: dbModel.ContaCorrenteOrigemId,
-            contaCorrenteDestinoId: dbModel.ContaCorrenteDestinoId,
-            dataMovimento: dbModel.DataMovimento,
-            valor: dbModel.Valor,
-            tarifaAplicada: dbModel.TarifaAplicada,
-            status: Enum.Parse<TransferenciaStatus>(dbModel.Status),
-            mensagemErro: dbModel.MensagemErro,
-            identificacaoRequisicao: dbModel.IdentificacaoRequisicao);
-
-        return transferenciaAtualizada;
+        // Centraliza a conversão banco -> domínio (SEM Enum.Parse duplicado)
+        dbModel.Id = id;
+        return dbModel.ToEntity();
     }
 
     public async Task AtualizarAsync(
-        TransferenciaEntity transferencia, 
+        TransferenciaEntity transferencia,
         CancellationToken cancellationToken = default)
     {
         using var connection = _connectionFactory.CreateConnection();
@@ -94,24 +86,25 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
     }
 
     public async Task<IEnumerable<TransferenciaEntity>> ObterPorContaAsync(
-        long contaId, 
+        long contaId,
         CancellationToken cancellationToken = default)
     {
         using var connection = _connectionFactory.CreateConnection();
 
         const string sql = @"
             SELECT 
-                idtransferencia as Id,
-                idcontacorrente_origem as ContaCorrenteOrigemId,
-                idcontacorrente_destino as ContaCorrenteDestinoId,
-                datamovimento as DataMovimento,
-                valor as Valor,
-                tarifa_aplicada as TarifaAplicada,
-                status as Status,
-                mensagem_erro as MensagemErro,
-                identificacao_requisicao as IdentificacaoRequisicao
+                idtransferencia AS Id,
+                idcontacorrente_origem AS ContaCorrenteOrigemId,
+                idcontacorrente_destino AS ContaCorrenteDestinoId,
+                datamovimento AS DataMovimento,
+                valor AS Valor,
+                tarifa_aplicada AS TarifaAplicada,
+                status AS Status,
+                mensagem_erro AS MensagemErro,
+                identificacao_requisicao AS IdentificacaoRequisicao
             FROM transferencia
-            WHERE idcontacorrente_origem = @ContaId OR idcontacorrente_destino = @ContaId
+            WHERE idcontacorrente_origem = @ContaId 
+               OR idcontacorrente_destino = @ContaId
             ORDER BY datamovimento DESC";
 
         var results = await connection.QueryAsync<TransferenciaDbModel>(
@@ -120,8 +113,10 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
         return results.Select(r => r.ToEntity());
     }
 
-    // Modelo para mapeamento do banco
-    private class TransferenciaDbModel
+    // =========================
+    // DB MODEL (mapeamento)
+    // =========================
+    private sealed class TransferenciaDbModel
     {
         public long Id { get; set; }
         public long ContaCorrenteOrigemId { get; set; }
@@ -143,7 +138,7 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
                 DataMovimento = entity.DataMovimento,
                 Valor = entity.Valor,
                 TarifaAplicada = entity.TarifaAplicada,
-                Status = entity.Status.ToString(),
+                Status = entity.Status.ToString().ToUpperInvariant(),
                 MensagemErro = entity.MensagemErro,
                 IdentificacaoRequisicao = entity.IdentificacaoRequisicao
             };
@@ -158,9 +153,17 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
                 dataMovimento: DataMovimento,
                 valor: Valor,
                 tarifaAplicada: TarifaAplicada,
-                status: Enum.Parse<TransferenciaStatus>(Status),
+                status: Status switch
+                {
+                    "PROCESSANDO" => TransferenciaStatus.Processando,
+                    "CONCLUIDA"   => TransferenciaStatus.Concluida,
+                    "FALHA"       => TransferenciaStatus.Falha,
+                    "ESTORNADA"   => TransferenciaStatus.Estornada,
+                    _ => throw new InvalidOperationException($"Status inválido no banco: {Status}")
+                },
                 mensagemErro: MensagemErro,
-                identificacaoRequisicao: IdentificacaoRequisicao);
+                identificacaoRequisicao: IdentificacaoRequisicao
+            );
         }
     }
 }
