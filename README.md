@@ -566,21 +566,9 @@ Este projeto está licenciado sob a **Licença MIT** - veja o arquivo [LICENSE](
 ## 🆘 Suporte
 
 - **Documentação**: [docs.ailosbank.com](https://docs.ailosbank.com)
-- **Issues**: [GitHub Issues](https://github.com/seu-usuario/ailos-banking/issues)
+- **Issues**: [GitHub Issues](https://github.com/EnzoVieira3012/ailos-test/issues)
 - **Email**: suporte@ailosbank.com
 - **Slack**: #ailos-developers
-
-## 🏆 Diferenciais Técnicos
-
-### **Para a Vaga de Sênior**
-1. **Arquitetura de Microsserviços** - Comunicação via HTTP + Kafka
-2. **Transações Distribuídas** - Com rollback automático
-3. **Idempotência Garantida** - Middleware + service layer
-4. **Ofuscação de IDs** - Segurança adicional
-5. **Containerização Completa** - Docker + Docker Compose
-6. **Kafka Integration** - Mensageria assíncrona
-7. **Health Checks** - Monitoramento nativo
-8. **DDD & Clean Architecture** - Separação de responsabilidades
 
 ---
 
