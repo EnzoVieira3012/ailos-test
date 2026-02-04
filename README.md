@@ -2,7 +2,51 @@
 
 ## 🏦 Visão Geral do Sistema
 
-Sistema bancário completo composto por **3 microsserviços** que trabalham em conjunto para fornecer operações financeiras seguras, escaláveis e com arquitetura moderna. Desenvolvido em .NET 8 com padrões de mercado e boas práticas de desenvolvimento.
+Sistema bancário completo composto por **3 microsserviços** e uma **aplicação frontend** que trabalham em conjunto para fornecer operações financeiras seguras, escaláveis e com arquitetura moderna. Desenvolvido em .NET 8 (backend) e React 19 (frontend) com padrões de mercado e boas práticas de desenvolvimento.
+
+## 🎨 Frontend BankMore Digital
+
+Foi desenvolvido um frontend moderno e responsivo para interagir com os microsserviços do Ailos Banking System. O frontend é uma aplicação React com TypeScript, estilizada com Tailwind CSS e construída com Vite.
+
+### 🚀 Tecnologias do Frontend
+- **React 19** com TypeScript
+- **Vite** para build e desenvolvimento rápido
+- **Tailwind CSS** para estilização
+- **React Router DOM** para navegação
+- **Context API** para gerenciamento de estado
+- **Fetch API** para comunicação com os microsserviços
+
+### 📁 Repositório do Frontend
+O código fonte do frontend está disponível em: [https://github.com/EnzoVieira3012/bankmore-digital](https://github.com/EnzoVieira3012/bankmore-digital)
+
+### ✨ Funcionalidades do Frontend
+- **Autenticação** (login e registro)
+- **Dashboard** com visão geral da conta
+- **Transferências** entre contas
+- **Movimentações** (depósitos e saques)
+- **Histórico de transações**
+- **Configurações da conta**
+- **Painel administrativo** (para gerenciamento de idempotência)
+
+### 🏗️ Integração com os Microsserviços
+O frontend se comunica com as APIs do Ailos Banking System através de um proxy configurado no Vite, garantindo segurança e evitando problemas de CORS. As APIs de conta corrente e transferência são acessadas via endpoints específicos.
+
+### 🚀 Como Executar o Frontend
+```bash
+# Clone o repositório
+git clone https://github.com/EnzoVieira3012/bankmore-digital.git
+
+# Entre na pasta do projeto
+cd bankmore-digital
+
+# Instale as dependências
+npm install
+
+# Execute em modo de desenvolvimento
+npm run dev
+```
+
+A aplicação frontend estará disponível em `http://localhost:3000`.
 
 ## 📦 Componentes do Sistema
 
@@ -57,8 +101,9 @@ Sistema bancário completo composto por **3 microsserviços** que trabalham em c
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Aplicações Client-Side                    │
-│  (Web/Mobile Apps, Third-party Integrations)                │
+│                    Frontend BankMore Digital                 │
+│          (React 19 + TypeScript + Tailwind CSS)             │
+│                    http://localhost:3000                     │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -120,6 +165,31 @@ graph TD
 - `POST /api/transferencia` - Realizar transferência
 - `GET /api/transferencia/historico` - Histórico de transferências
 
+## ⚠️ NOTA IMPORTANTE: Formato da Transferência
+
+**ATENÇÃO**: Para realizar uma transferência, o campo `contaDestinoId` deve ser enviado como **STRING**, **não como objeto**. O formato correto é:
+
+```json
+{
+  "identificacaoRequisicao": "transferencia-corrigida-001",
+  "contaDestinoId": "1no6w623RGfqhCAykGKbIZ0Xd7ASlcV44UhxN0aolzk",
+  "valor": 20.00,
+  "descricao": "Transferência após correção"
+}
+```
+
+**NÃO USE este formato (incorreto):**
+```json
+{
+  "identificacaoRequisicao": "string",
+  "contaDestinoId": {
+    "value": "string"
+  },
+  "valor": 0,
+  "descricao": "string"
+}
+```
+
 ## 🛠️ Stack Tecnológica
 
 ### **Backend (.NET 8)**
@@ -129,6 +199,14 @@ graph TD
 - **SQLite** - Banco de dados leve e embutido
 - **JWT Bearer** - Autenticação por tokens
 - **BCrypt.Net** - Criptografia de senhas
+
+### **Frontend (React 19)**
+- **React 19** - Biblioteca principal
+- **TypeScript** - Tipagem estática
+- **Vite** - Build tool e dev server
+- **Tailwind CSS** - Framework de estilos
+- **React Router DOM** - Navegação
+- **Context API** - Gerenciamento de estado
 
 ### **Comunicação & Mensageria**
 - **Kafka** - Sistema de mensageria distribuído
@@ -165,13 +243,16 @@ dotnet --version  # Deve mostrar 8.x.x
 docker --version
 docker-compose --version
 
-# 3. Git
+# 3. Node.js 18+ (para frontend)
+node --version
+
+# 4. Git
 git --version
 ```
 
-### Clone e Configuração
+### Clone e Configuração do Backend
 ```bash
-# 1. Clone o repositório
+# 1. Clone o repositório do backend
 git clone https://github.com/seu-usuario/ailos-banking-system.git
 cd ailos-banking-system
 
@@ -186,8 +267,24 @@ dotnet restore
 docker-compose up -d --build
 ```
 
+### Configuração do Frontend
+```bash
+# 1. Clone o repositório do frontend
+git clone https://github.com/EnzoVieira3012/bankmore-digital.git
+cd bankmore-digital
+
+# 2. Instale dependências
+npm install
+
+# 3. Execute o frontend
+npm run dev
+```
+
 ### Acesse os Serviços
 ```bash
+# Frontend BankMore Digital
+http://localhost:3000
+
 # API Conta Corrente - Swagger
 http://localhost:5081/swagger
 
@@ -388,7 +485,7 @@ curl -X POST "http://localhost:5081/api/contacorrente/login" \
   }'
 ```
 
-### **3. Transferência com Idempotência**
+### **3. Transferência com Idempotência (FORMATO CORRETO)**
 ```bash
 curl -X POST "http://localhost:5082/api/transferencia" \
   -H "Authorization: Bearer {TOKEN_JWT}" \
@@ -578,6 +675,8 @@ Este projeto está licenciado sob a **Licença MIT** - veja o arquivo [LICENSE](
 **Soluções bancárias modernas, seguras e escaláveis**
 
 [![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://reactjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript)](https://typescriptlang.org/)
 [![Docker](https://img.shields.io/badge/Docker-✓-2496ED?logo=docker)](https://docker.com)
 [![Kafka](https://img.shields.io/badge/Kafka-✓-231F20?logo=apachekafka)](https://kafka.apache.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
